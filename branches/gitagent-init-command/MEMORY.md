@@ -11,6 +11,7 @@ Active
 
 ## Decisions Log
 - [2026-08-29 16:15 UTC] Chose structured Q&A + single Ollama synthesis per field over a full conversational loop - reuses the proven close_branch pattern instead of building new multi-turn infrastructure.
+- [2026-08-29 16:15 UTC] init_project refuses to run if STATE_TRACKER.md already exists, and requires an existing repo to already be on MAIN_BRANCH rather than renaming it automatically.
 
 ## Sub-Branches
 
