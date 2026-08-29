@@ -7,5 +7,6 @@ Implement update_branch(name, note): append a timestamped note to a branch's MEM
 Active
 
 ## Decisions Log
+- [2026-08-29 14:00 UTC] Implemented update_branch() in tools.py and wired the update-branch CLI subcommand. Appends timestamped bullets to the Decisions Log section of the branch's MEMORY.md and commits on the current branch.
 
 ## Open Questions
