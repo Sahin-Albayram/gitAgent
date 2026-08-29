@@ -24,6 +24,7 @@
 | Branch-003 | Define Tech Stack | Finalize base workspace technologies (orchestration frameworks, local vector store, interface). | Planned | Documented architectural decisions. | main |
 | Branch-004 | Base Assistant Chat UI | Create a minimal chat interface connected to the local model runtime. | Planned | A lightweight working UI for basic conversation. | main |
 | Branch-005 | gitagent-update-branch | Implement update_branch(name, note): append a timestamped note to a branch's MEMORY.md as the git-commit equivalent of a working note. | Completed | The update_branch(name, note) function was implemented in tools.py, allowing timestamped notes to be appended to a branch's MEMORY.md file, and was integrated with the update-branch CLI subcommand. The outcome is a persistent state tracker for branch notes, with ordered and timestamped entries. | main |
+| Branch-006 | gitagent-nested-branching | Add a base parameter to open_branch so branches can nest under other branches instead of always coming off main; make branches actually diverge (checkout-based) so close_branch's merge is real. | Active | | main |
 
 ## Implementation Guidelines & Rules
 1. **Step-by-Step Integration:** Implement each layer locally before building higher-level abstractions.
