@@ -3,9 +3,16 @@
 Each function here is exposed as a tool call to the local Ollama model.
 Git itself is the substrate: branches are real `git branch`es that actually
 diverge (each branch's own commits carry its `branches/<name>/MEMORY.md`),
-so `close_branch`'s merge is a real merge, not a no-op. STATE_TRACKER.md is
-the one exception - it's only ever read/written on MAIN_BRANCH, so it stays
-authoritative and current regardless of how deep a branch is nested.
+so `close_branch`'s merge is a real merge, not a no-op.
+
+STATE_TRACKER.md only ever gets a row for a top-level branch (one opened
+straight off MAIN_BRANCH) - it's read/written exclusively on MAIN_BRANCH, so
+it stays authoritative and stays small regardless of how much nested work
+happens underneath a given side branch. A nested branch instead gets logged
+into its *root* branch's own MEMORY.md, under a `## Sub-Branches` section -
+one line per descendant, at any depth, updated on open and again on close.
+That keeps the detail one hop away (the root's MEMORY.md) instead of
+flooding STATE_TRACKER.md with a row per branch ever opened.
 """
 from __future__ import annotations
 
@@ -56,6 +63,8 @@ Active
 
 ## Decisions Log
 
+## Sub-Branches
+
 ## Open Questions
 """
 
@@ -84,10 +93,6 @@ def _branch_exists(name: str) -> bool:
     return result.returncode == 0
 
 
-def _current_branch() -> str:
-    return _run_git("rev-parse", "--abbrev-ref", "HEAD")
-
-
 def _ensure_clean_worktree() -> None:
     """Refuse to switch branches over uncommitted changes to tracked files.
 
@@ -103,6 +108,27 @@ def _ensure_clean_worktree() -> None:
         )
 
 
+def _branched_from(name: str) -> str:
+    """Read a branch's recorded parent from its own MEMORY.md.
+
+    Works via `git show`, so it doesn't require checking `name` out, and
+    works just as well after `name` has been closed (its own branch ref and
+    history stick around even once merged elsewhere).
+    """
+    memory_text = _run_git("show", f"{name}:branches/{name}/MEMORY.md")
+    lines = memory_text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "## Branched From")
+    return lines[start + 1].strip()
+
+
+def _root_branch(name: str) -> str:
+    """Walk `## Branched From` up until it hits a branch opened off MAIN_BRANCH."""
+    current = name
+    while _branched_from(current) != MAIN_BRANCH:
+        current = _branched_from(current)
+    return current
+
+
 def _next_branch_id(lines: list[str]) -> str:
     ids = []
     for line in lines:
@@ -112,7 +138,7 @@ def _next_branch_id(lines: list[str]) -> str:
     return f"Branch-{max(ids, default=0) + 1:03d}"
 
 
-def _insert_state_tracker_row(branch_id: str, name: str, description: str, base: str) -> None:
+def _insert_state_tracker_row(branch_id: str, name: str, description: str) -> None:
     lines = STATE_TRACKER_PATH.read_text(encoding="utf-8").splitlines()
 
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("| Branch ID"))
@@ -120,23 +146,66 @@ def _insert_state_tracker_row(branch_id: str, name: str, description: str, base:
     while row_idx < len(lines) and lines[row_idx].startswith("|"):
         row_idx += 1
 
-    row = f"| {branch_id} | {name} | {description} | Active | | {base} |"
+    row = f"| {branch_id} | {name} | {description} | Active | |"
     lines.insert(row_idx, row)
 
     STATE_TRACKER_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
-    """Create a git branch off `base` and its scoped MEMORY.md, marking it
-    Active in STATE_TRACKER.md.
+def _section_end(lines: list[str], header: str) -> int:
+    start = next(i for i, line in enumerate(lines) if line.strip() == header)
+    end = start + 1
+    while end < len(lines) and not lines[end].startswith("## "):
+        end += 1
+    return end
 
-    `base` can be MAIN_BRANCH (the default - a normal top-level branch) or
-    the name of another open branch, to nest work under it. The branch
+
+def _append_bullet(memory_path: Path, header: str, bullet: str) -> None:
+    lines = memory_path.read_text(encoding="utf-8").splitlines()
+    insert_idx = _section_end(lines, header)
+    while insert_idx > 0 and lines[insert_idx - 1].strip() == "":
+        insert_idx -= 1
+    lines.insert(insert_idx, bullet)
+    memory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _log_sub_branch_open(root: str, name: str, description: str) -> None:
+    memory_path = BRANCHES_DIR / root / "MEMORY.md"
+    _append_bullet(memory_path, "## Sub-Branches", f"- **{name}** — Active — {description}")
+    _run_git("add", str(memory_path.relative_to(WORKSPACE_ROOT)))
+    _run_git("commit", "-m", f"Log open of {name} under {root}")
+
+
+def _log_sub_branch_close(root: str, name: str, summary: str) -> None:
+    memory_path = BRANCHES_DIR / root / "MEMORY.md"
+    lines = memory_path.read_text(encoding="utf-8").splitlines()
+    prefix = f"- **{name}**"
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[i] = f"- **{name}** — Completed — {summary}"
+            break
+    else:
+        raise GitAgentError(f"no Sub-Branches entry for {name} under {root}")
+    memory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _run_git("add", str(memory_path.relative_to(WORKSPACE_ROOT)))
+    _run_git("commit", "-m", f"Log close of {name} under {root}")
+
+
+def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
+    """Create a git branch off `base` and its scoped MEMORY.md.
+
+    `base` can be MAIN_BRANCH (the default - a normal top-level side branch)
+    or the name of another open branch, to nest work under it. The branch
     actually diverges: its MEMORY.md is only ever committed on its own
-    branch, never on MAIN_BRANCH. STATE_TRACKER.md, however, is always read
-    and written on MAIN_BRANCH specifically, regardless of `base`, so it
-    stays visible and current without needing anything merged first. Ends
-    checked out on the new branch, ready to work.
+    branch.
+
+    A top-level branch gets an Active row in STATE_TRACKER.md, on
+    MAIN_BRANCH. A nested branch gets no row at all - instead it's logged
+    as an Active line under its root branch's own `## Sub-Branches` section
+    (the root being whichever ancestor was itself opened off MAIN_BRANCH),
+    so STATE_TRACKER.md stays one row per side branch no matter how much
+    nesting happens underneath it. Ends checked out on the new branch,
+    ready to work.
     """
     if not BRANCH_NAME_RE.match(name):
         raise GitAgentError(f"invalid branch name: {name!r}")
@@ -147,12 +216,17 @@ def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
 
     _ensure_clean_worktree()
 
-    _run_git("checkout", MAIN_BRANCH)
-    lines = STATE_TRACKER_PATH.read_text(encoding="utf-8").splitlines()
-    branch_id = _next_branch_id(lines)
-    _insert_state_tracker_row(branch_id, name, description, base)
-    _run_git("add", str(STATE_TRACKER_PATH.relative_to(WORKSPACE_ROOT)))
-    _run_git("commit", "-m", f"Open branch: {name}")
+    if base == MAIN_BRANCH:
+        _run_git("checkout", MAIN_BRANCH)
+        lines = STATE_TRACKER_PATH.read_text(encoding="utf-8").splitlines()
+        branch_id = _next_branch_id(lines)
+        _insert_state_tracker_row(branch_id, name, description)
+        _run_git("add", str(STATE_TRACKER_PATH.relative_to(WORKSPACE_ROOT)))
+        _run_git("commit", "-m", f"Open branch: {name}")
+    else:
+        root = _root_branch(base)
+        _run_git("checkout", root)
+        _log_sub_branch_open(root, name, description)
 
     _run_git("checkout", "-b", name, base)
     branch_dir = BRANCHES_DIR / name
@@ -166,14 +240,6 @@ def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
     _run_git("commit", "-m", f"Open branch: {name}")
 
     return memory_path
-
-
-def _section_end(lines: list[str], header: str) -> int:
-    start = next(i for i, line in enumerate(lines) if line.strip() == header)
-    end = start + 1
-    while end < len(lines) and not lines[end].startswith("## "):
-        end += 1
-    return end
 
 
 def update_branch(name: str, note: str) -> Path:
@@ -193,15 +259,8 @@ def update_branch(name: str, note: str) -> Path:
     if not memory_path.exists():
         raise GitAgentError(f"no MEMORY.md found for branch: {name}")
 
-    lines = memory_path.read_text(encoding="utf-8").splitlines()
-    insert_idx = _section_end(lines, "## Decisions Log")
-    while insert_idx > 0 and lines[insert_idx - 1].strip() == "":
-        insert_idx -= 1
-
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines.insert(insert_idx, f"- [{timestamp}] {note}")
-
-    memory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _append_bullet(memory_path, "## Decisions Log", f"- [{timestamp}] {note}")
 
     _run_git("add", str(memory_path.relative_to(WORKSPACE_ROOT)))
     _run_git("commit", "-m", f"Update branch: {name}")
@@ -232,21 +291,6 @@ def _summarize_with_ollama(memory_text: str) -> str:
     return summary.replace("|", "/").replace("\n", " ")
 
 
-def _state_tracker_row(text: str, name: str) -> list[str]:
-    for line in text.splitlines():
-        if not line.startswith("|"):
-            continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 6 and cells[1] == name:
-            return cells
-    raise GitAgentError(f"no STATE_TRACKER.md row found for branch: {name}")
-
-
-def _branch_base(name: str) -> str:
-    canonical = _run_git("show", f"{MAIN_BRANCH}:STATE_TRACKER.md")
-    return _state_tracker_row(canonical, name)[5]
-
-
 def _update_state_tracker_status(name: str, status: str, outcome: str) -> None:
     lines = STATE_TRACKER_PATH.read_text(encoding="utf-8").splitlines()
 
@@ -254,7 +298,7 @@ def _update_state_tracker_status(name: str, status: str, outcome: str) -> None:
         if not line.startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 6 and cells[1] == name:
+        if len(cells) == 5 and cells[1] == name:
             cells[3] = status
             cells[4] = outcome
             lines[i] = "| " + " | ".join(cells) + " |"
@@ -268,15 +312,18 @@ def _update_state_tracker_status(name: str, status: str, outcome: str) -> None:
 def close_branch(name: str) -> Path:
     """Summarize, merge, and archive a branch.
 
-    Summarizes the branch's MEMORY.md via the local Ollama model, merges the
-    branch into its recorded base (MAIN_BRANCH for a top-level branch, or
-    the parent branch it was nested under - see `open_branch`), marks it
-    Completed in STATE_TRACKER.md with that summary, and moves (never
-    deletes) the MEMORY.md into branches/archived/<name>/ on the base branch
-    so the raw log stays retrievable. STATE_TRACKER.md is always read and
-    written on MAIN_BRANCH regardless of `base`, but the function ends
-    checked out back on `base` - not MAIN_BRANCH - so the archived MEMORY.md
-    this returns is actually visible in the working tree.
+    Summarizes the branch's MEMORY.md via the local Ollama model and merges
+    the branch into its recorded base (MAIN_BRANCH for a top-level branch,
+    or the parent branch it was nested under - see `open_branch`), then
+    moves (never deletes) the MEMORY.md into branches/archived/<name>/ on
+    the base branch so the raw log stays retrievable.
+
+    If `name` was top-level, its STATE_TRACKER.md row is marked Completed
+    with that summary, on MAIN_BRANCH. If `name` was nested, STATE_TRACKER.md
+    is untouched - instead its root branch's `## Sub-Branches` line for
+    `name` is updated to Completed with that summary. Either way, ends
+    checked out back on `base`, so the archived MEMORY.md this returns is
+    actually visible in the working tree.
     """
     if not _branch_exists(name):
         raise GitAgentError(f"branch does not exist: {name}")
@@ -284,7 +331,7 @@ def close_branch(name: str) -> Path:
     _ensure_clean_worktree()
 
     memory_text = _run_git("show", f"{name}:branches/{name}/MEMORY.md")
-    base = _branch_base(name)
+    base = _branched_from(name)
     summary = _summarize_with_ollama(memory_text)
 
     _run_git("checkout", base)
@@ -299,12 +346,15 @@ def close_branch(name: str) -> Path:
     )
     _run_git("commit", "-m", f"Archive branch: {name}")
 
-    _run_git("checkout", MAIN_BRANCH)
-    _update_state_tracker_status(name, "Completed", summary)
-    _run_git("add", str(STATE_TRACKER_PATH.relative_to(WORKSPACE_ROOT)))
-    _run_git("commit", "-m", f"Close branch: {name}")
-
-    if base != MAIN_BRANCH:
-        _run_git("checkout", base)
+    if base == MAIN_BRANCH:
+        _update_state_tracker_status(name, "Completed", summary)
+        _run_git("add", str(STATE_TRACKER_PATH.relative_to(WORKSPACE_ROOT)))
+        _run_git("commit", "-m", f"Close branch: {name}")
+    else:
+        root = _root_branch(base)
+        _run_git("checkout", root)
+        _log_sub_branch_close(root, name, summary)
+        if root != base:
+            _run_git("checkout", base)
 
     return archive_dir / "MEMORY.md"
