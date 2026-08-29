@@ -10,5 +10,6 @@ Add a base parameter to open_branch so branches can nest under other branches in
 Active
 
 ## Decisions Log
+- [2026-08-29 15:09 UTC] Switched update_branch/close_branch to checkout the target branch instead of staying on the caller's branch, since MEMORY.md now only lives on its own branch's history.
 
 ## Open Questions
