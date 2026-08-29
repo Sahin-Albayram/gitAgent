@@ -17,13 +17,13 @@
 
 ## Side Branches (Features & Quests)
 
-| Branch ID | Feature / Quest Name | Description | Status | Target Outcome |
-|---|---|---|---|---|
-| Branch-001 | Local LLM Setup & Benchmarking | Download and test local open-weight models (e.g., Llama 3, Mistral, Qwen) using a local runner (e.g., Ollama) to evaluate hardware performance and latency. | Completed | A validated local LLM runtime with recorded response times and VRAM usage. |
-| Branch-002 | GitAgent (Agentic Git Memory) | Develop a system to automatically manage Main Line and version memory. Handles creating branches, merging, and updating context. | Active | A functional Git-like context management tool. |
-| Branch-003 | Define Tech Stack | Finalize base workspace technologies (orchestration frameworks, local vector store, interface). | Planned | Documented architectural decisions. |
-| Branch-004 | Base Assistant Chat UI | Create a minimal chat interface connected to the local model runtime. | Planned | A lightweight working UI for basic conversation. |
-| Branch-005 | gitagent-update-branch | Implement update_branch(name, note): append a timestamped note to a branch's MEMORY.md as the git-commit equivalent of a working note. | Completed | The update_branch(name, note) function was implemented in tools.py, allowing timestamped notes to be appended to a branch's MEMORY.md file, and was integrated with the update-branch CLI subcommand. The outcome is a persistent state tracker for branch notes, with ordered and timestamped entries. |
+| Branch ID | Feature / Quest Name | Description | Status | Target Outcome | Base |
+|---|---|---|---|---|---|
+| Branch-001 | Local LLM Setup & Benchmarking | Download and test local open-weight models (e.g., Llama 3, Mistral, Qwen) using a local runner (e.g., Ollama) to evaluate hardware performance and latency. | Completed | A validated local LLM runtime with recorded response times and VRAM usage. | main |
+| Branch-002 | GitAgent (Agentic Git Memory) | Develop a system to automatically manage Main Line and version memory. Handles creating branches, merging, and updating context. | Active | A functional Git-like context management tool. | main |
+| Branch-003 | Define Tech Stack | Finalize base workspace technologies (orchestration frameworks, local vector store, interface). | Planned | Documented architectural decisions. | main |
+| Branch-004 | Base Assistant Chat UI | Create a minimal chat interface connected to the local model runtime. | Planned | A lightweight working UI for basic conversation. | main |
+| Branch-005 | gitagent-update-branch | Implement update_branch(name, note): append a timestamped note to a branch's MEMORY.md as the git-commit equivalent of a working note. | Completed | The update_branch(name, note) function was implemented in tools.py, allowing timestamped notes to be appended to a branch's MEMORY.md file, and was integrated with the update-branch CLI subcommand. The outcome is a persistent state tracker for branch notes, with ordered and timestamped entries. | main |
 
 ## Implementation Guidelines & Rules
 1. **Step-by-Step Integration:** Implement each layer locally before building higher-level abstractions.
