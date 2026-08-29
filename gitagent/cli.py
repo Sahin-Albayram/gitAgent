@@ -5,6 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .init import init_project
 from .tools import MAIN_BRANCH, GitAgentError, close_branch, open_branch, update_branch
 from .visualize import render_branch_graph
 
@@ -12,6 +13,20 @@ from .visualize import render_branch_graph
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gitagent")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init_parser = subparsers.add_parser(
+        "init", help="Bootstrap STATE_TRACKER.md (and the repo/branches dir) for a new project"
+    )
+    init_parser.add_argument("--name", help="Project name (prompted if omitted)")
+    init_parser.add_argument(
+        "--goal", help="What you're building, in your own words (prompted if omitted)"
+    )
+    init_parser.add_argument(
+        "--motivation", help="Why it matters to you (prompted if omitted; optional)"
+    )
+    init_parser.add_argument(
+        "--methodology", help="How you want to work on it (prompted if omitted; optional)"
+    )
 
     open_branch_parser = subparsers.add_parser(
         "open-branch", help="Create a new branch and its scoped MEMORY.md"
@@ -45,6 +60,23 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    if args.command == "init":
+        name = args.name or input("Project name: ").strip()
+        goal = args.goal or input("What are you building? ").strip()
+        motivation = args.motivation
+        if motivation is None:
+            motivation = input("Why does this matter to you? (optional) ").strip()
+        methodology = args.methodology
+        if methodology is None:
+            methodology = input("How do you want to work on it? (optional) ").strip()
+        try:
+            state_tracker_path = init_project(name, goal, motivation, methodology)
+        except GitAgentError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Initialized project '{name}' -> {state_tracker_path}")
+        return 0
 
     if args.command == "open-branch":
         try:
