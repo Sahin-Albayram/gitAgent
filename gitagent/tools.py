@@ -48,7 +48,7 @@ Branch memory:
 {memory}
 """
 
-BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 MEMORY_TEMPLATE = """# Branch Memory: {name}
 
@@ -85,6 +85,17 @@ def _run_git(*args: str) -> str:
     return result.stdout.strip()
 
 
+def _find_line_index(lines: list[str], predicate, description: str) -> int:
+    """Like next(i for i, line in enumerate(lines) if predicate(line)), but
+    raises GitAgentError instead of StopIteration when nothing matches - a
+    hand-edited MEMORY.md/STATE_TRACKER.md missing an expected section
+    should fail with a clear message, not a raw traceback."""
+    for i, line in enumerate(lines):
+        if predicate(line):
+            return i
+    raise GitAgentError(f"malformed memory file: could not find {description}")
+
+
 def _branch_exists(name: str) -> bool:
     result = subprocess.run(
         ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
@@ -117,7 +128,11 @@ def _branched_from(name: str) -> str:
     """
     memory_text = _run_git("show", f"{name}:branches/{name}/MEMORY.md")
     lines = memory_text.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.strip() == "## Branched From")
+    start = _find_line_index(
+        lines,
+        lambda line: line.strip() == "## Branched From",
+        f"'## Branched From' section in {name}'s MEMORY.md",
+    )
     return lines[start + 1].strip()
 
 
@@ -141,7 +156,11 @@ def _next_branch_id(lines: list[str]) -> str:
 def _insert_state_tracker_row(branch_id: str, name: str, description: str) -> None:
     lines = STATE_TRACKER_PATH.read_text(encoding="utf-8").splitlines()
 
-    header_idx = next(i for i, line in enumerate(lines) if line.startswith("| Branch ID"))
+    header_idx = _find_line_index(
+        lines,
+        lambda line: line.startswith("| Branch ID"),
+        "'| Branch ID' table header in STATE_TRACKER.md",
+    )
     row_idx = header_idx + 2  # skip header and separator row
     while row_idx < len(lines) and lines[row_idx].startswith("|"):
         row_idx += 1
@@ -153,7 +172,9 @@ def _insert_state_tracker_row(branch_id: str, name: str, description: str) -> No
 
 
 def _section_end(lines: list[str], header: str) -> int:
-    start = next(i for i, line in enumerate(lines) if line.strip() == header)
+    start = _find_line_index(
+        lines, lambda line: line.strip() == header, f"{header!r} section"
+    )
     end = start + 1
     while end < len(lines) and not lines[end].startswith("## "):
         end += 1
@@ -166,6 +187,22 @@ def _append_bullet(memory_path: Path, header: str, bullet: str) -> None:
     while insert_idx > 0 and lines[insert_idx - 1].strip() == "":
         insert_idx -= 1
     lines.insert(insert_idx, bullet)
+    memory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _set_memory_status(memory_path: Path, status: str) -> None:
+    """Overwrite a MEMORY.md's own `## Status` value in place."""
+    lines = memory_path.read_text(encoding="utf-8").splitlines()
+    header_idx = _find_line_index(
+        lines, lambda line: line.strip() == "## Status", f"'## Status' section in {memory_path}"
+    )
+    value_idx = header_idx + 1
+    while value_idx < len(lines) and lines[value_idx].strip() == "":
+        value_idx += 1
+    if value_idx < len(lines) and not lines[value_idx].startswith("## "):
+        lines[value_idx] = status
+    else:
+        lines.insert(header_idx + 1, status)
     memory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -344,6 +381,9 @@ def close_branch(name: str) -> Path:
         str((BRANCHES_DIR / name).relative_to(WORKSPACE_ROOT)),
         str(archive_dir.relative_to(WORKSPACE_ROOT)),
     )
+    archived_memory_path = archive_dir / "MEMORY.md"
+    _set_memory_status(archived_memory_path, "Completed")
+    _run_git("add", str(archived_memory_path.relative_to(WORKSPACE_ROOT)))
     _run_git("commit", "-m", f"Archive branch: {name}")
 
     if base == MAIN_BRANCH:

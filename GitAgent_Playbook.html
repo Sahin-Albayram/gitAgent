@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+</head>
+<body>
+<title>GitAgent Playbook</title>
+<style>
+:root {
+  --paper: #f1f3ee;
+  --paper-raised: #ffffff;
+  --ink: #1c231f;
+  --ink-dim: #5b665f;
+  --ink-faint: #8b958c;
+  --line: #d8ddd2;
+  --line-strong: #c1c9b8;
+  --accent: #1f6f52;
+  --accent-ink: #14503a;
+  --accent-soft: #e2ede4;
+  --mono-bg: #262b25;
+  --mono-ink: #e7ece2;
+  --mono-dim: #93a08f;
+  --state-active: #a5650a;
+  --state-active-soft: #f6e9d4;
+  --state-done: #1f6f52;
+  --state-done-soft: #e2ede4;
+  --shadow: 0 1px 2px rgba(28, 35, 31, 0.06), 0 8px 24px rgba(28, 35, 31, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14170f;
+    --paper-raised: #1b1f16;
+    --ink: #e9ede3;
+    --ink-dim: #a7b19d;
+    --ink-faint: #71796b;
+    --line: #2b3123;
+    --line-strong: #3a4230;
+    --accent: #56b98a;
+    --accent-ink: #7fd3a8;
+    --accent-soft: #1e2e22;
+    --mono-bg: #0f120c;
+    --mono-ink: #dce4d5;
+    --mono-dim: #6f7a67;
+    --state-active: #d99a3d;
+    --state-active-soft: #2e2413;
+    --state-done: #56b98a;
+    --state-done-soft: #16281d;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14170f;
+  --paper-raised: #1b1f16;
+  --ink: #e9ede3;
+  --ink-dim: #a7b19d;
+  --ink-faint: #71796b;
+  --line: #2b3123;
+  --line-strong: #3a4230;
+  --accent: #56b98a;
+  --accent-ink: #7fd3a8;
+  --accent-soft: #1e2e22;
+  --mono-bg: #0f120c;
+  --mono-ink: #dce4d5;
+  --mono-dim: #6f7a67;
+  --state-active: #d99a3d;
+  --state-active-soft: #2e2413;
+  --state-done: #56b98a;
+  --state-done-soft: #16281d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.6;
+}
+h1, h2, h3 {
+  font-family: 'Newsreader', Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+  text-wrap: balance;
+  margin: 0;
+}
+code, pre, .mono {
+  font-family: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+a { color: var(--accent-ink); }
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+}
+.nav-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+.nav-inner .brand {
+  font-family: 'Newsreader', serif;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--ink);
+  margin-right: auto;
+}
+.nav-inner a {
+  color: var(--ink-dim);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+}
+.nav-inner a:hover, .nav-inner a:focus-visible { color: var(--accent-ink); }
+
+.page { padding-bottom: 80px; }
+.col {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+.wide { max-width: 1000px; }
+
+header.hero {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 56px 20px 8px;
+}
+header.hero .eyebrow {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+header.hero h1 {
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  margin-top: 10px;
+  letter-spacing: -0.01em;
+}
+header.hero p.lede {
+  margin-top: 16px;
+  font-size: 1.05rem;
+  color: var(--ink-dim);
+  max-width: 60ch;
+}
+
+section { padding: 48px 0 8px; }
+section.band {
+  background: var(--paper-raised);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.section-head { margin-bottom: 22px; }
+.section-head .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+}
+.section-head h2 {
+  font-size: 1.6rem;
+  margin-top: 4px;
+}
+.section-head p { color: var(--ink-dim); margin-top: 8px; max-width: 62ch; }
+
+p { margin: 0 0 14px; }
+ul, ol { padding-left: 1.3em; margin: 0 0 14px; }
+li { margin-bottom: 6px; }
+
+.callout {
+  border: 1px solid var(--line-strong);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 14px 16px;
+  font-size: 0.92rem;
+  color: var(--ink);
+  margin: 18px 0;
+}
+.callout strong { color: var(--accent-ink); }
+
+.cmd {
+  display: block;
+  background: var(--mono-bg);
+  color: var(--mono-ink);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  margin: 14px 0;
+}
+.cmd .arg { color: var(--mono-dim); }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 22px 0 8px;
+}
+@media (max-width: 700px) { .cards { grid-template-columns: 1fr; } }
+.card {
+  border: 1px solid var(--line);
+  background: var(--paper-raised);
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+.card .kicker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.card h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.02rem;
+  font-weight: 600;
+  margin-top: 6px;
+  color: var(--ink);
+}
+.card .when {
+  margin-top: 10px;
+  font-size: 0.86rem;
+  color: var(--ink-dim);
+}
+.card .when b { color: var(--ink); font-weight: 600; }
+.card.llm { border-color: color-mix(in srgb, var(--state-active) 45%, var(--line)); }
+.card .badge {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 100px;
+  background: var(--state-active-soft);
+  color: var(--state-active);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 600;
+}
+.card .badge.none { background: var(--line); color: var(--ink-dim); }
+
+figure { margin: 22px 0; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+/* Walkthrough */
+.walk {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-raised);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.walk-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.walk-controls .step-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+}
+.walk-btn {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 100px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.walk-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.walk-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.walk-btn:disabled { opacity: 0.35; cursor: default; background: var(--paper); border-color: var(--line); }
+.walk-dots { display: flex; gap: 6px; margin-left: auto; }
+.walk-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line-strong);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.walk-dot[aria-current="true"] { background: var(--accent); }
+.walk-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.walk-caption { padding: 16px 18px 4px; }
+.walk-caption .call {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.86rem;
+  color: var(--accent-ink);
+  word-break: break-word;
+}
+.walk-caption .expl {
+  margin-top: 8px;
+  font-size: 0.92rem;
+  color: var(--ink-dim);
+}
+
+.walk-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 760px) { .walk-panels { grid-template-columns: 1fr; } }
+.panel { padding: 16px 18px 20px; min-width: 0; }
+.panel + .panel { border-left: 1px solid var(--line); }
+@media (max-width: 760px) { .panel + .panel { border-left: none; border-top: 1px solid var(--line); } }
+.panel-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-title .changed-tag {
+  background: var(--state-active-soft);
+  color: var(--state-active);
+  font-size: 0.66rem;
+  padding: 2px 7px;
+  border-radius: 100px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 600;
+}
+
+table.tracker {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+table.tracker th {
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-strong);
+}
+table.tracker td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--ink);
+}
+table.tracker tr.changed td { background: var(--accent-soft); }
+table.tracker tr.changed { box-shadow: inset 3px 0 0 var(--accent); }
+.pill {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+.pill.active { background: var(--state-active-soft); color: var(--state-active); }
+.pill.done { background: var(--state-done-soft); color: var(--state-done); }
+.tracker-empty {
+  font-size: 0.84rem;
+  color: var(--ink-faint);
+  font-style: italic;
+  padding: 12px 0;
+}
+
+.mem-box {
+  background: var(--mono-bg);
+  color: var(--mono-ink);
+  border-radius: 8px;
+  padding: 4px 0;
+  font-size: 0.78rem;
+  overflow-x: auto;
+}
+.mem-box .line {
+  padding: 1px 14px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-height: 1.5em;
+}
+.mem-box .line.changed { background: color-mix(in srgb, var(--state-active) 22%, transparent); }
+.mem-empty {
+  font-size: 0.84rem;
+  color: var(--ink-faint);
+  font-style: italic;
+  padding: 20px 4px;
+}
+
+table.ref {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 16px;
+}
+table.ref th {
+  text-align: left;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-strong);
+}
+table.ref td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+table.ref td.cmdcell { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: var(--accent-ink); white-space: nowrap; }
+.ref-wrap { overflow-x: auto; }
+
+dl.faq dt {
+  font-weight: 600;
+  margin-top: 20px;
+  font-size: 0.98rem;
+}
+dl.faq dd {
+  margin: 6px 0 0;
+  color: var(--ink-dim);
+  font-size: 0.92rem;
+}
+
+footer {
+  max-width: 760px;
+  margin: 40px auto 0;
+  padding: 20px 20px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+</style>
+
+<div class="nav">
+  <div class="nav-inner">
+    <span class="brand">GitAgent</span>
+    <a href="#start">Start a project</a>
+    <a href="#lifecycle">Branch lifecycle</a>
+    <a href="#walkthrough">Walkthrough</a>
+    <a href="#reference">Reference</a>
+    <a href="#faq">FAQ</a>
+  </div>
+</div>
+
+<div class="page">
+
+<header class="hero">
+  <div class="eyebrow">Playbook</div>
+  <h1>Opening, updating, and closing branches</h1>
+  <p class="lede">GitAgent turns real git branches into scoped memory for a project. This walks through starting a project, when to open a branch versus nest one, and exactly what each operation changes in <code>STATE_TRACKER.md</code> and a branch's own <code>MEMORY.md</code> — including a step-by-step look at the files themselves.</p>
+</header>
+
+<section id="start">
+  <div class="col">
+    <div class="section-head">
+      <div class="num">01</div>
+      <h2>Start a project</h2>
+      <p>Before any branch exists, a project needs a <code>STATE_TRACKER.md</code> — the persistent, always-current record of what's going on. <code>gitagent init</code> builds it from a few questions.</p>
+    </div>
+    <div class="cmd">$ python -m gitagent.cli init<br>
+<span class="arg">Project name:</span> Search Service<br>
+<span class="arg">What are you building?</span> A /search endpoint backed by an embeddings index<br>
+<span class="arg">Why does this matter to you? (optional)</span> Want a record of why I made each call, not just what I built<br>
+<span class="arg">How do you want to work on it? (optional)</span> Small steps, one branch per concern</div>
+    <p>Each non-blank answer is polished into a clean sentence by a single local-Ollama call — your words, tidied up, nothing invented — and written into <code>STATE_TRACKER.md</code>'s Overview &amp; Mission section. If the directory isn't a git repo yet, <code>init</code> creates one on <code>main</code>; if it already is one, it just requires that repo to already be on <code>main</code>. It also creates an empty <code>branches/</code> directory and makes the first commit. Run it once, at the very start — it refuses to touch a project that already has a <code>STATE_TRACKER.md</code>.</p>
+  </div>
+</section>
+
+<section id="lifecycle" class="band">
+  <div class="col">
+    <div class="section-head">
+      <div class="num">02</div>
+      <h2>The branch lifecycle</h2>
+      <p>Every piece of work becomes a real git branch with its own <code>MEMORY.md</code>. Three operations carry it through: open it, log notes as you go, close it when it's done.</p>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="kicker">Start</div>
+        <h3>open_branch</h3>
+        <p class="when">Use it <b>when you're about to start a distinct piece of work</b> — a feature, a fix, a question worth its own scoped memory. Give it a name and a one-line goal.</p>
+        <span class="badge none">No Ollama call</span>
+      </div>
+      <div class="card">
+        <div class="kicker">As you go</div>
+        <h3>update_branch</h3>
+        <p class="when">Use it <b>every time you make a decision or finish a step</b> worth remembering — as often as you like. It's just a timestamped note, cheap enough to call constantly.</p>
+        <span class="badge none">No Ollama call</span>
+      </div>
+      <div class="card llm">
+        <div class="kicker">Finish</div>
+        <h3>close_branch</h3>
+        <p class="when">Use it <b>once the work is actually done</b> — merged, resolved, abandoned-but-documented. It's the one step you can't easily undo, so don't call it mid-work.</p>
+        <span class="badge">Calls Ollama</span>
+      </div>
+    </div>
+
+    <div class="section-head" style="margin-top: 44px;">
+      <div class="num">02.1</div>
+      <h2>Top-level, or nested?</h2>
+      <p><code>open_branch</code> takes a <code>base</code> — which branch it's opened from. Left as the default, <code>main</code>, it's a normal top-level branch. Pass another open branch's name instead, and it nests under that branch rather than under <code>main</code>.</p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 700 200" role="img" aria-label="A diagram showing search-endpoint opened from main as a top-level branch, and search-endpoint-ranking opened from search-endpoint as a nested branch. The top-level branch's open and close land on STATE_TRACKER.md; the nested branch's open and close land on search-endpoint's own Sub-Branches section instead.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+          </marker>
+        </defs>
+        <g fill="none" stroke="currentColor" stroke-width="2" font-family="IBM Plex Mono, monospace">
+          <line x1="30" y1="40" x2="670" y2="40" marker-end="url(#arrow)" />
+          <text x="30" y="24" font-size="13" stroke="none" fill="currentColor">main</text>
+
+          <circle cx="150" cy="40" r="5" fill="currentColor" stroke="none" />
+          <line x1="150" y1="40" x2="230" y2="110" stroke-dasharray="0" />
+          <line x1="230" y1="110" x2="560" y2="110" marker-end="url(#arrow)" />
+          <circle cx="230" cy="110" r="5" fill="currentColor" stroke="none" />
+          <text x="240" y="94" font-size="13" stroke="none" fill="currentColor">search-endpoint</text>
+
+          <circle cx="340" cy="110" r="5" fill="currentColor" stroke="none" />
+          <line x1="340" y1="110" x2="420" y2="170" />
+          <line x1="420" y1="170" x2="640" y2="170" marker-end="url(#arrow)" />
+          <circle cx="420" cy="170" r="5" fill="currentColor" stroke="none" />
+          <text x="430" y="188" font-size="13" stroke="none" fill="currentColor">search-endpoint-ranking</text>
+        </g>
+        <g font-family="IBM Plex Sans, sans-serif" font-size="12">
+          <rect x="112" y="0" width="150" height="20" rx="10" fill="none" />
+          <text x="150" y="12" text-anchor="middle" fill="var(--accent-ink)" font-weight="600">→ STATE_TRACKER.md</text>
+          <text x="230" y="76" text-anchor="middle" fill="var(--accent-ink)" font-weight="600">→ STATE_TRACKER.md (on close)</text>
+          <text x="420" y="150" text-anchor="middle" fill="var(--state-active)" font-weight="600">→ search-endpoint's Sub-Branches</text>
+        </g>
+      </svg>
+      <figcaption>Opening or closing a top-level branch (base=main) is what moves STATE_TRACKER.md. A nested branch's open/close instead logs into its root branch's own Sub-Branches section — no matter how many levels deep it's nested.</figcaption>
+    </figure>
+
+    <div class="callout">
+      <strong>Rule of thumb:</strong> open top-level when the work is its own concern someone would look for in <code>STATE_TRACKER.md</code>. Nest it when the work only makes sense in service of something already open — a sub-question, a follow-up detail, a fix scoped to one in-progress feature.
+    </div>
+  </div>
+</section>
+
+<section id="walkthrough">
+  <div class="col wide">
+    <div class="section-head">
+      <div class="num">03</div>
+      <h2>Watch it happen</h2>
+      <p>One realistic sequence, start to finish: open a top-level branch, nest a branch under it, log a note, then close both. Step through it — each step shows exactly what changed in <code>STATE_TRACKER.md</code> and in whichever <code>MEMORY.md</code> the call actually touched.</p>
+    </div>
+
+    <div class="walk">
+      <div class="walk-controls">
+        <button class="walk-btn" id="prevBtn" type="button">← Prev</button>
+        <button class="walk-btn" id="nextBtn" type="button">Next →</button>
+        <span class="step-label" id="stepLabel">Step 1 of 6</span>
+        <div class="walk-dots" id="dots" role="tablist" aria-label="Walkthrough steps"></div>
+      </div>
+      <div class="walk-caption">
+        <div class="call" id="callText"></div>
+        <div class="expl" id="explText"></div>
+      </div>
+      <div class="walk-panels">
+        <div class="panel">
+          <div class="panel-title">STATE_TRACKER.md <span class="changed-tag" id="trackerTag" hidden>changed</span></div>
+          <div id="trackerPanel"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title" id="memTitle">branches/…/MEMORY.md</div>
+          <div id="memPanel"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="reference" class="band">
+  <div class="col wide">
+    <div class="section-head">
+      <div class="num">04</div>
+      <h2>Quick reference</h2>
+      <p>The same four commands, side by side.</p>
+    </div>
+    <div class="ref-wrap">
+      <table class="ref">
+        <tr>
+          <th>Command</th>
+          <th>When</th>
+          <th>STATE_TRACKER.md</th>
+          <th>MEMORY.md</th>
+        </tr>
+        <tr>
+          <td class="cmdcell">gitagent init</td>
+          <td>Once, at the very start of a project.</td>
+          <td>Creates it.</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">open-branch name desc [-b base]</td>
+          <td>Starting a distinct piece of work (or nesting one under work already open).</td>
+          <td>+1 Active row — only if base is main.</td>
+          <td>Creates branches/name/MEMORY.md. If nested, also adds an Active line to the root's Sub-Branches.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">update-branch name note</td>
+          <td>Any time you make a decision or finish a step worth remembering. As often as you like.</td>
+          <td>Untouched.</td>
+          <td>Appends a timestamped bullet to that branch's own Decisions Log.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">close-branch name</td>
+          <td>Once, when the work is actually finished.</td>
+          <td>Row flips to Completed + Ollama summary — only if the branch was top-level.</td>
+          <td>Merges and archives it (branches/archived/…, never deleted). If nested, flips its line under the root's Sub-Branches to Completed + summary instead.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">graph [-o out]</td>
+          <td>Any time you want to see the branch/commit structure.</td>
+          <td>Read-only.</td>
+          <td>Read-only.</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="col">
+    <div class="section-head">
+      <div class="num">05</div>
+      <h2>Things worth knowing</h2>
+    </div>
+    <dl class="faq">
+      <dt>Do I need Ollama running for all of this?</dt>
+      <dd>Only for <code>close_branch</code> (and the polish step in <code>init</code>). Opening and updating branches never call it — they're plain structured logging.</dd>
+
+      <dt>I checked out a branch that isn't main and STATE_TRACKER.md looks out of date. Is that a bug?</dt>
+      <dd>No — it's only guaranteed current on <code>main</code>. Any other branch's copy is a snapshot from whenever it forked. Use <code>git show main:STATE_TRACKER.md</code> to see the real, current table from anywhere.</dd>
+
+      <dt>Does closing a branch delete anything?</dt>
+      <dd>No. A closed branch's <code>MEMORY.md</code> moves to <code>branches/archived/…</code> — the raw log stays retrievable forever, it's just no longer the active copy.</dd>
+
+      <dt>How deep can nesting go?</dt>
+      <dd>As deep as you want. A grandchild branch still logs into the same root's Sub-Branches section as a direct child would — it's flattened, not indented, so <code>STATE_TRACKER.md</code> never grows past one row per top-level branch no matter how much nested work happens underneath it.</dd>
+
+      <dt>What if I close a nested branch before I'm done with its parent?</dt>
+      <dd>That's the normal order, not an edge case — close the nested branch first, its summary lands on the parent's Sub-Branches, then close the parent whenever that's actually finished.</dd>
+    </dl>
+  </div>
+</section>
+
+<footer>
+  Generated for the GitAgent project. Every screen above reflects the real behavior of <code>gitagent/tools.py</code>, verified against a live sandbox run.
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var steps = [
+    {
+      call: '# nothing open yet',
+      expl: 'Before any branch exists, STATE_TRACKER.md is fresh from gitagent init - no rows - and there is no MEMORY.md to show.',
+      tracker: { rows: [], changedId: null },
+      mem: null
+    },
+    {
+      call: 'open_branch("search-endpoint", "Add a /search endpoint backed by the new embeddings index.")',
+      expl: 'A top-level branch (base defaults to main) gets both: a new Active row in STATE_TRACKER.md, and its own fresh MEMORY.md.',
+      tracker: {
+        rows: [
+          { id: 'Branch-001', name: 'search-endpoint', desc: 'Add a /search endpoint backed by the new embeddings index.', status: 'active', outcome: '' }
+        ],
+        changedId: 'Branch-001'
+      },
+      mem: {
+        title: 'branches/search-endpoint/MEMORY.md',
+        changed: true,
+        lines: [
+          '# Branch Memory: search-endpoint', '',
+          '## Branched From', 'main', '',
+          '## Goal', 'Add a /search endpoint backed by the new embeddings index.', '',
+          '## Status', 'Active', '',
+          '## Decisions Log', '',
+          '## Sub-Branches', '',
+          '## Open Questions'
+        ],
+        changedLines: [0,1,2,3,4,5,6,7,8,9,10,11,12,13]
+      }
+    },
+    {
+      call: 'open_branch("search-endpoint-ranking", "Work out the ranking/scoring formula for search results.", base="search-endpoint")',
+      expl: 'Nested: base is another open branch, not main. STATE_TRACKER.md does not move. Instead search-endpoint - the root - gets a new Active line under Sub-Branches. (search-endpoint-ranking also gets its own blank MEMORY.md, same as any branch - just nothing has happened on it yet.)',
+      tracker: {
+        rows: [
+          { id: 'Branch-001', name: 'search-endpoint', desc: 'Add a /search endpoint backed by the new embeddings index.', status: 'active', outcome: '' }
+        ],
+        changedId: null
+      },
+      mem: {
+        title: 'branches/search-endpoint/MEMORY.md',
+        changed: true,
+        lines: [
+          '# Branch Memory: search-endpoint', '',
+          '## Branched From', 'main', '',
+          '## Goal', 'Add a /search endpoint backed by the new embeddings index.', '',
+          '## Status', 'Active', '',
+          '## Decisions Log', '',
+          '## Sub-Branches',
+          '- **search-endpoint-ranking** — Active — Work out the ranking/scoring formula for search results.',
+          '',
+          '## Open Questions'
+        ],
+        changedLines: [13]
+      }
+    },
+    {
+      call: 'update_branch("search-endpoint-ranking", "Cosine similarity on the raw embedding, no re-ranking pass for v1.")',
+      expl: 'update_branch only ever touches the branch’s own Decisions Log - no LLM call, no STATE_TRACKER.md involvement. Just a timestamped note.',
+      tracker: {
+        rows: [
+          { id: 'Branch-001', name: 'search-endpoint', desc: 'Add a /search endpoint backed by the new embeddings index.', status: 'active', outcome: '' }
+        ],
+        changedId: null
+      },
+      mem: {
+        title: 'branches/search-endpoint-ranking/MEMORY.md',
+        changed: true,
+        lines: [
+          '# Branch Memory: search-endpoint-ranking', '',
+          '## Branched From', 'search-endpoint', '',
+          '## Goal', 'Work out the ranking/scoring formula for search results.', '',
+          '## Status', 'Active', '',
+          '## Decisions Log',
+          '- [2026-08-30 10:14 UTC] Cosine similarity on the raw embedding, no re-ranking pass for v1.',
+          '',
+          '## Sub-Branches', '',
+          '## Open Questions'
+        ],
+        changedLines: [10]
+      }
+    },
+    {
+      call: 'close_branch("search-endpoint-ranking")',
+      expl: 'Closing a nested branch merges it into its base (search-endpoint, not main) and archives its MEMORY.md - never deleted. Because it was nested, its line under the root’s Sub-Branches flips to Completed with an Ollama-written summary. STATE_TRACKER.md still has not moved.',
+      tracker: {
+        rows: [
+          { id: 'Branch-001', name: 'search-endpoint', desc: 'Add a /search endpoint backed by the new embeddings index.', status: 'active', outcome: '' }
+        ],
+        changedId: null
+      },
+      mem: {
+        title: 'branches/search-endpoint/MEMORY.md',
+        changed: true,
+        lines: [
+          '# Branch Memory: search-endpoint', '',
+          '## Branched From', 'main', '',
+          '## Goal', 'Add a /search endpoint backed by the new embeddings index.', '',
+          '## Status', 'Active', '',
+          '## Decisions Log', '',
+          '## Sub-Branches',
+          '- **search-endpoint-ranking** — Completed — Added cosine-similarity ranking for search results, scoring directly on the raw embedding with no re-ranking pass planned for v1.',
+          '',
+          '## Open Questions'
+        ],
+        changedLines: [13]
+      }
+    },
+    {
+      call: 'close_branch("search-endpoint")',
+      expl: 'Closing a top-level branch is the only other time STATE_TRACKER.md moves: one row, flipped to Completed, summarized by Ollama from the whole tree - including what happened in the nested ranking branch. Both MEMORY.md files are now archived under branches/archived/, on main - never deleted.',
+      tracker: {
+        rows: [
+          { id: 'Branch-001', name: 'search-endpoint', desc: 'Add a /search endpoint backed by the new embeddings index.', status: 'done', outcome: 'Added a /search endpoint backed by the new embeddings index, including a ranking step that scores results by cosine similarity on the raw embedding.' }
+        ],
+        changedId: 'Branch-001'
+      },
+      mem: {
+        title: 'branches/archived/search-endpoint/MEMORY.md',
+        changed: false,
+        lines: [
+          '# Branch Memory: search-endpoint', '',
+          '## Branched From', 'main', '',
+          '## Goal', 'Add a /search endpoint backed by the new embeddings index.', '',
+          '## Status', 'Active', '',
+          '## Decisions Log', '',
+          '## Sub-Branches',
+          '- **search-endpoint-ranking** — Completed — Added cosine-similarity ranking for search results, scoring directly on the raw embedding with no re-ranking pass planned for v1.',
+          '',
+          '## Open Questions'
+        ],
+        changedLines: []
+      }
+    }
+  ];
+
+  var idx = 0;
+  var prevBtn = document.getElementById('prevBtn');
+  var nextBtn = document.getElementById('nextBtn');
+  var stepLabel = document.getElementById('stepLabel');
+  var callText = document.getElementById('callText');
+  var explText = document.getElementById('explText');
+  var trackerPanel = document.getElementById('trackerPanel');
+  var trackerTag = document.getElementById('trackerTag');
+  var memPanel = document.getElementById('memPanel');
+  var memTitle = document.getElementById('memTitle');
+  var dotsWrap = document.getElementById('dots');
+
+  steps.forEach(function (_, i) {
+    var dot = document.createElement('button');
+    dot.className = 'walk-dot';
+    dot.type = 'button';
+    dot.setAttribute('role', 'tab');
+    dot.setAttribute('aria-label', 'Step ' + (i + 1));
+    dot.addEventListener('click', function () { idx = i; render(); });
+    dotsWrap.appendChild(dot);
+  });
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderTracker(t) {
+    if (!t.rows.length) {
+      trackerPanel.innerHTML = '<div class="tracker-empty">No rows yet.</div>';
+      trackerTag.hidden = true;
+      return;
+    }
+    var html = '<table class="tracker"><tr><th>ID</th><th>Name</th><th>Status</th><th>Outcome</th></tr>';
+    t.rows.forEach(function (r) {
+      var cls = r.id === t.changedId ? ' class="changed"' : '';
+      var pill = r.status === 'done'
+        ? '<span class="pill done">Completed</span>'
+        : '<span class="pill active">Active</span>';
+      html += '<tr' + cls + '><td>' + r.id + '</td><td>' + escapeHtml(r.name) + '</td><td>' + pill + '</td><td>' + escapeHtml(r.outcome || '—') + '</td></tr>';
+    });
+    html += '</table>';
+    trackerPanel.innerHTML = html;
+    trackerTag.hidden = !t.changedId;
+  }
+
+  function renderMem(m) {
+    if (!m) {
+      memTitle.textContent = 'MEMORY.md';
+      memPanel.innerHTML = '<div class="mem-empty">Nothing to show yet - MEMORY.md files are created by open_branch.</div>';
+      return;
+    }
+    memTitle.textContent = m.title;
+    var html = '<div class="mem-box">';
+    m.lines.forEach(function (line, i) {
+      var cls = m.changedLines.indexOf(i) !== -1 ? ' changed' : '';
+      html += '<div class="line' + cls + '">' + (escapeHtml(line) || '&nbsp;') + '</div>';
+    });
+    html += '</div>';
+    memPanel.innerHTML = html;
+  }
+
+  function render() {
+    var s = steps[idx];
+    stepLabel.textContent = 'Step ' + (idx + 1) + ' of ' + steps.length;
+    callText.textContent = s.call;
+    explText.textContent = s.expl;
+    renderTracker(s.tracker);
+    renderMem(s.mem);
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === steps.length - 1;
+    Array.prototype.forEach.call(dotsWrap.children, function (dot, i) {
+      dot.setAttribute('aria-current', i === idx ? 'true' : 'false');
+    });
+  }
+
+  prevBtn.addEventListener('click', function () { if (idx > 0) { idx--; render(); } });
+  nextBtn.addEventListener('click', function () { if (idx < steps.length - 1) { idx++; render(); } });
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight' && idx < steps.length - 1) { idx++; render(); }
+    if (e.key === 'ArrowLeft' && idx > 0) { idx--; render(); }
+  });
+
+  render();
+})();
+</script>
+
+</body>
+</html>
