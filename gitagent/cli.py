@@ -6,7 +6,14 @@ import sys
 from pathlib import Path
 
 from .init import init_project
-from .tools import MAIN_BRANCH, GitAgentError, close_branch, open_branch, update_branch
+from .tools import (
+    MAIN_BRANCH,
+    GitAgentError,
+    close_branch,
+    list_branches,
+    open_branch,
+    update_branch,
+)
 from .visualize import render_branch_graph
 
 
@@ -40,17 +47,35 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Branch to open this one from (default: {MAIN_BRANCH}); pass another open "
         "branch's name to nest under it",
     )
+    open_branch_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would happen without doing it"
+    )
 
     update_branch_parser = subparsers.add_parser(
         "update-branch", help="Append a timestamped note to a branch's MEMORY.md"
     )
     update_branch_parser.add_argument("name", help="Branch name")
     update_branch_parser.add_argument("note", help="Note to append to the branch's Decisions Log")
+    update_branch_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would happen without doing it"
+    )
 
     close_branch_parser = subparsers.add_parser(
         "close-branch", help="Summarize, merge, and archive a branch"
     )
     close_branch_parser.add_argument("name", help="Branch name")
+    close_branch_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would happen without doing it"
+    )
+
+    status_parser = subparsers.add_parser(
+        "status", help="List branches from STATE_TRACKER.md"
+    )
+    status_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include Completed/Abandoned branches too (default: Active only)",
+    )
 
     graph_parser = subparsers.add_parser(
         "graph", help="Render the commit/branch graph to a standalone HTML file"
@@ -80,29 +105,47 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "open-branch":
         try:
-            memory_path = open_branch(args.name, args.description, base=args.base)
+            result = open_branch(args.name, args.description, base=args.base, dry_run=args.dry_run)
         except GitAgentError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        print(f"Opened branch '{args.name}' -> {memory_path}")
+        print(result if args.dry_run else f"Opened branch '{args.name}' -> {result}")
         return 0
 
     if args.command == "update-branch":
         try:
-            memory_path = update_branch(args.name, args.note)
+            result = update_branch(args.name, args.note, dry_run=args.dry_run)
         except GitAgentError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        print(f"Updated branch '{args.name}' -> {memory_path}")
+        print(result if args.dry_run else f"Updated branch '{args.name}' -> {result}")
         return 0
 
     if args.command == "close-branch":
         try:
-            memory_path = close_branch(args.name)
+            result = close_branch(args.name, dry_run=args.dry_run)
         except GitAgentError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        print(f"Closed branch '{args.name}' -> {memory_path}")
+        print(result if args.dry_run else f"Closed branch '{args.name}' -> {result}")
+        return 0
+
+    if args.command == "status":
+        try:
+            branches = list_branches()
+        except GitAgentError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if not args.all:
+            branches = [b for b in branches if b.status == "Active"]
+        if not branches:
+            print("No branches." if args.all else "No active branches.")
+            return 0
+        for branch in branches:
+            print(f"[{branch.id}] {branch.name} — {branch.status}")
+            print(f"    {branch.description}")
+            for sub in branch.sub_branches:
+                print(f"    {sub}")
         return 0
 
     if args.command == "graph":

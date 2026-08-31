@@ -22,8 +22,11 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ._git import GitAgentError, run_git
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 BRANCHES_DIR = WORKSPACE_ROOT / "branches"
@@ -69,20 +72,8 @@ Active
 """
 
 
-class GitAgentError(RuntimeError):
-    """Raised when a GitAgent tool operation cannot complete."""
-
-
 def _run_git(*args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=WORKSPACE_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise GitAgentError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+    return run_git(WORKSPACE_ROOT, *args)
 
 
 def _find_line_index(lines: list[str], predicate, description: str) -> int:
@@ -104,19 +95,37 @@ def _branch_exists(name: str) -> bool:
     return result.returncode == 0
 
 
-def _ensure_clean_worktree() -> None:
-    """Refuse to switch branches over uncommitted changes to tracked files.
+def _is_gitagent_path(path: str) -> bool:
+    return path == "STATE_TRACKER.md" or path.startswith("branches/")
 
-    Untracked files are fine - git itself already refuses a checkout that
+
+def _ensure_clean_worktree() -> None:
+    """Refuse to switch branches over uncommitted changes to GitAgent's own
+    tracked files (STATE_TRACKER.md, branches/).
+
+    Only those paths matter - an in-progress edit to some unrelated file
+    elsewhere in the workspace shouldn't block a branch operation. Untracked
+    files are fine either way - git itself already refuses a checkout that
     would actually clobber one, so there's no need to be stricter here.
     """
     status = _run_git("status", "--porcelain")
-    dirty = [line for line in status.splitlines() if not line.startswith("??")]
+    dirty = []
+    for line in status.splitlines():
+        if line.startswith("??"):
+            continue
+        paths = line[3:].split(" -> ")  # rename lines are "old -> new"
+        if any(_is_gitagent_path(p) for p in paths):
+            dirty.append(line)
     if dirty:
         raise GitAgentError(
-            "working tree has uncommitted changes - commit or stash them "
-            "before running a GitAgent tool that switches branches"
+            "STATE_TRACKER.md or branches/ has uncommitted changes - commit "
+            "or stash them before running a GitAgent tool that switches branches"
         )
+
+
+def _read_file_at_ref(ref: str, path: str) -> str:
+    """Read a file's contents as of `ref`, without touching the worktree."""
+    return _run_git("show", f"{ref}:{path}")
 
 
 def _branched_from(name: str) -> str:
@@ -126,7 +135,7 @@ def _branched_from(name: str) -> str:
     works just as well after `name` has been closed (its own branch ref and
     history stick around even once merged elsewhere).
     """
-    memory_text = _run_git("show", f"{name}:branches/{name}/MEMORY.md")
+    memory_text = _read_file_at_ref(name, f"branches/{name}/MEMORY.md")
     lines = memory_text.splitlines()
     start = _find_line_index(
         lines,
@@ -151,6 +160,19 @@ def _next_branch_id(lines: list[str]) -> str:
         if match:
             ids.append(int(match.group(1)))
     return f"Branch-{max(ids, default=0) + 1:03d}"
+
+
+def _iter_table_rows(lines: list[str]):
+    """Yield (line_index, cells) for each STATE_TRACKER.md branch row,
+    skipping the header and separator rows. Shared by status updates and
+    `list_branches`."""
+    for i, line in enumerate(lines):
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) != 5 or cells[0] in ("Branch ID", "---"):
+            continue
+        yield i, cells
 
 
 def _insert_state_tracker_row(branch_id: str, name: str, description: str) -> None:
@@ -179,6 +201,20 @@ def _section_end(lines: list[str], header: str) -> int:
     while end < len(lines) and not lines[end].startswith("## "):
         end += 1
     return end
+
+
+def _section_body(lines: list[str], header: str) -> list[str]:
+    """Return the non-empty lines within a `## <header>` section."""
+    start = _find_line_index(
+        lines, lambda line: line.strip() == header, f"{header!r} section"
+    )
+    end = _section_end(lines, header)
+    return [line for line in lines[start + 1 : end] if line.strip()]
+
+
+def _format_dry_run(action: str, steps: list[str]) -> str:
+    lines = [f"[dry run] {action}"] + [f"  - {step}" for step in steps]
+    return "\n".join(lines)
 
 
 def _append_bullet(memory_path: Path, header: str, bullet: str) -> None:
@@ -228,7 +264,9 @@ def _log_sub_branch_close(root: str, name: str, summary: str) -> None:
     _run_git("commit", "-m", f"Log close of {name} under {root}")
 
 
-def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
+def open_branch(
+    name: str, description: str, base: str = MAIN_BRANCH, dry_run: bool = False
+) -> Path | str:
     """Create a git branch off `base` and its scoped MEMORY.md.
 
     `base` can be MAIN_BRANCH (the default - a normal top-level side branch)
@@ -243,6 +281,12 @@ def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
     so STATE_TRACKER.md stays one row per side branch no matter how much
     nesting happens underneath it. Ends checked out on the new branch,
     ready to work.
+
+    If `dry_run` is True, does all the same validation but no mutation -
+    no branch is created, no file is written - and returns a human-readable
+    preview string instead of the MEMORY.md path. This is the guard against
+    the local Ollama model driving this tool via the tool-calling loop with
+    no human confirming each call.
     """
     if not BRANCH_NAME_RE.match(name):
         raise GitAgentError(f"invalid branch name: {name!r}")
@@ -252,6 +296,20 @@ def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
         raise GitAgentError(f"base branch does not exist: {base}")
 
     _ensure_clean_worktree()
+
+    if dry_run:
+        if base == MAIN_BRANCH:
+            tracker_text = _read_file_at_ref(MAIN_BRANCH, "STATE_TRACKER.md")
+            branch_id = _next_branch_id(tracker_text.splitlines())
+            steps = [f"insert STATE_TRACKER.md row {branch_id} for '{name}' (Active)"]
+        else:
+            root = _root_branch(base)
+            steps = [f"log open of '{name}' under root branch '{root}' (## Sub-Branches)"]
+        steps += [
+            f"create branch '{name}' from '{base}'",
+            f"write branches/{name}/MEMORY.md",
+        ]
+        return _format_dry_run(f"open_branch({name!r}, base={base!r})", steps)
 
     if base == MAIN_BRANCH:
         _run_git("checkout", MAIN_BRANCH)
@@ -279,22 +337,33 @@ def open_branch(name: str, description: str, base: str = MAIN_BRANCH) -> Path:
     return memory_path
 
 
-def update_branch(name: str, note: str) -> Path:
+def update_branch(name: str, note: str, dry_run: bool = False) -> Path | str:
     """Append a timestamped note to a branch's MEMORY.md - the commit equivalent.
 
     Checks out `name` (from wherever the worktree currently is) and commits
     the note there, since MEMORY.md only exists on that branch's own history.
     Ends checked out on `name`.
+
+    If `dry_run` is True, validates but doesn't check out `name` or write
+    anything, returning a preview string instead of the MEMORY.md path.
     """
     if not _branch_exists(name):
         raise GitAgentError(f"branch does not exist: {name}")
 
     _ensure_clean_worktree()
-    _run_git("checkout", name)
 
+    memory_rel_path = f"branches/{name}/MEMORY.md"
+    try:
+        _read_file_at_ref(name, memory_rel_path)
+    except GitAgentError:
+        raise GitAgentError(f"no MEMORY.md found for branch: {name}") from None
+
+    if dry_run:
+        steps = [f"checkout '{name}'", f"append note to {memory_rel_path}'s ## Decisions Log"]
+        return _format_dry_run(f"update_branch({name!r})", steps)
+
+    _run_git("checkout", name)
     memory_path = BRANCHES_DIR / name / "MEMORY.md"
-    if not memory_path.exists():
-        raise GitAgentError(f"no MEMORY.md found for branch: {name}")
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     _append_bullet(memory_path, "## Decisions Log", f"- [{timestamp}] {note}")
@@ -331,11 +400,8 @@ def _summarize_with_ollama(memory_text: str) -> str:
 def _update_state_tracker_status(name: str, status: str, outcome: str) -> None:
     lines = STATE_TRACKER_PATH.read_text(encoding="utf-8").splitlines()
 
-    for i, line in enumerate(lines):
-        if not line.startswith("|"):
-            continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 5 and cells[1] == name:
+    for i, cells in _iter_table_rows(lines):
+        if cells[1] == name:
             cells[3] = status
             cells[4] = outcome
             lines[i] = "| " + " | ".join(cells) + " |"
@@ -346,7 +412,49 @@ def _update_state_tracker_status(name: str, status: str, outcome: str) -> None:
     STATE_TRACKER_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def close_branch(name: str) -> Path:
+@dataclass
+class BranchStatus:
+    id: str
+    name: str
+    description: str
+    status: str
+    outcome: str
+    sub_branches: list[str] = field(default_factory=list)
+
+
+def _read_sub_branches(name: str) -> list[str]:
+    memory_text = _read_file_at_ref(name, f"branches/{name}/MEMORY.md")
+    return _section_body(memory_text.splitlines(), "## Sub-Branches")
+
+
+def list_branches() -> list[BranchStatus]:
+    """Read STATE_TRACKER.md's branch table, with each Active row's own
+    `## Sub-Branches` lines from that branch's own MEMORY.md attached -
+    read via `git show` (see `_read_file_at_ref`) so it works regardless of
+    which branch is currently checked out.
+
+    Not every STATE_TRACKER.md row necessarily corresponds to an actual git
+    branch - some are hand-authored higher-level entries (e.g. an umbrella
+    row for a whole initiative) that predate a row always meaning "there's a
+    real branch of this name". Sub-branches just come back empty for those
+    rather than raising.
+    """
+    tracker_text = _read_file_at_ref(MAIN_BRANCH, "STATE_TRACKER.md")
+    lines = tracker_text.splitlines()
+    branches = []
+    for _, cells in _iter_table_rows(lines):
+        branch_id, name, description, status, outcome = cells
+        sub_branches = []
+        if status == "Active":
+            try:
+                sub_branches = _read_sub_branches(name)
+            except GitAgentError:
+                pass
+        branches.append(BranchStatus(branch_id, name, description, status, outcome, sub_branches))
+    return branches
+
+
+def close_branch(name: str, dry_run: bool = False) -> Path | str:
     """Summarize, merge, and archive a branch.
 
     Summarizes the branch's MEMORY.md via the local Ollama model and merges
@@ -361,14 +469,32 @@ def close_branch(name: str) -> Path:
     `name` is updated to Completed with that summary. Either way, ends
     checked out back on `base`, so the archived MEMORY.md this returns is
     actually visible in the working tree.
+
+    If `dry_run` is True, skips the Ollama call too (so this works even
+    without Ollama running) and returns a preview string instead of doing
+    the merge/archive/status-update.
     """
     if not _branch_exists(name):
         raise GitAgentError(f"branch does not exist: {name}")
 
     _ensure_clean_worktree()
 
-    memory_text = _run_git("show", f"{name}:branches/{name}/MEMORY.md")
     base = _branched_from(name)
+
+    if dry_run:
+        steps = [
+            "generate a summary of its MEMORY.md via Ollama",
+            f"merge '{name}' into '{base}' (--no-ff)",
+            f"archive branches/{name}/MEMORY.md -> branches/archived/{name}/MEMORY.md "
+            "(status -> Completed)",
+        ]
+        if base == MAIN_BRANCH:
+            steps.append(f"mark '{name}' Completed in STATE_TRACKER.md")
+        else:
+            steps.append(f"mark '{name}' Completed under '{_root_branch(base)}'s ## Sub-Branches")
+        return _format_dry_run(f"close_branch({name!r})", steps)
+
+    memory_text = _read_file_at_ref(name, f"branches/{name}/MEMORY.md")
     summary = _summarize_with_ollama(memory_text)
 
     _run_git("checkout", base)

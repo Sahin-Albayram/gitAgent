@@ -10,10 +10,11 @@ same as the rest of gitagent.
 from __future__ import annotations
 
 import html
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ._git import run_git
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -48,12 +49,7 @@ class Commit:
 
 
 def _run_git(*args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=WORKSPACE_ROOT, capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout
+    return run_git(WORKSPACE_ROOT, *args)
 
 
 def _load_commits() -> list[Commit]:

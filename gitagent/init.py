@@ -9,12 +9,12 @@ already-collected answers.
 from __future__ import annotations
 
 import json
-import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .tools import MAIN_BRANCH, OLLAMA_HOST, OLLAMA_MODEL, GitAgentError
+from ._git import GitAgentError, run_git
+from .tools import MAIN_BRANCH, OLLAMA_HOST, OLLAMA_MODEL
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 STATE_TRACKER_PATH = WORKSPACE_ROOT / "STATE_TRACKER.md"
@@ -56,15 +56,7 @@ STATE_TRACKER_TEMPLATE = """# {name}: State Tracker
 
 
 def _run_git(*args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=WORKSPACE_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise GitAgentError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+    return run_git(WORKSPACE_ROOT, *args)
 
 
 def _polish_with_ollama(field: str, raw: str) -> str:
