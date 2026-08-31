@@ -222,3 +222,154 @@ def test_close_branch_dry_run_works_without_ollama(gitagent_repo, monkeypatch):
 
     result = tools.close_branch("gitagent-real-branch", dry_run=True)
     assert "[dry run]" in result
+
+
+# --- squash on close ---------------------------------------------------------
+
+def _log(repo: Path, ref: str) -> str:
+    return subprocess.run(
+        ["git", "log", "--oneline", ref],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def test_close_branch_squashes_note_commits_out_of_base_history(gitagent_repo):
+    tools.open_branch("squashed", "a branch with chatty notes")
+    tools.update_branch("squashed", "note one")
+    tools.update_branch("squashed", "note two")
+    archived_path = tools.close_branch("squashed")
+
+    main_log = _log(gitagent_repo, "main")
+    # the per-note bookkeeping commits must not clutter the main line
+    assert "Update branch: squashed" not in main_log
+    assert "Squash-merge branch 'squashed'" in main_log
+
+    # ...but nothing is lost: the notes live on in the archived memory,
+    # and the branch ref keeps its full commit-by-commit history
+    archived_text = archived_path.read_text(encoding="utf-8")
+    assert "note one" in archived_text and "note two" in archived_text
+    assert "Update branch: squashed" in _log(gitagent_repo, "squashed")
+
+
+def test_close_branch_no_squash_keeps_every_commit(gitagent_repo):
+    tools.open_branch("unsquashed", "a branch with chatty notes")
+    tools.update_branch("unsquashed", "note one")
+    tools.close_branch("unsquashed", squash=False)
+
+    main_log = _log(gitagent_repo, "main")
+    assert "Update branch: unsquashed" in main_log
+    assert "Merge branch 'unsquashed'" in main_log
+
+
+def test_squash_default_follows_the_env_flag(gitagent_repo, monkeypatch):
+    monkeypatch.setattr(tools, "SQUASH_ON_CLOSE", False)
+
+    tools.open_branch("env-driven", "respects the configured default")
+    tools.update_branch("env-driven", "note one")
+    tools.close_branch("env-driven")  # no explicit squash= argument
+
+    assert "Update branch: env-driven" in _log(gitagent_repo, "main")
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("0", False), ("false", False), ("no", False), ("off", False), ("", False),
+     ("1", True), ("true", True), ("anything-else", True)],
+)
+def test_env_flag_parsing(monkeypatch, raw, expected):
+    monkeypatch.setenv("GITAGENT_TEST_FLAG", raw)
+    assert tools._env_flag("GITAGENT_TEST_FLAG", True) is expected
+
+
+def test_env_flag_falls_back_to_default_when_unset(monkeypatch):
+    monkeypatch.delenv("GITAGENT_TEST_FLAG", raising=False)
+    assert tools._env_flag("GITAGENT_TEST_FLAG", True) is True
+    assert tools._env_flag("GITAGENT_TEST_FLAG", False) is False
+
+
+# --- abandon_branch ----------------------------------------------------------
+
+def _merged_into(repo: Path, base: str) -> str:
+    return subprocess.run(
+        ["git", "branch", "--merged", base],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def test_abandon_branch_archives_without_merging(gitagent_repo):
+    tools.open_branch("gitagent-dead-end", "work that won't pan out")
+    tools.update_branch("gitagent-dead-end", "tried an approach")
+    archived_path = tools.abandon_branch("gitagent-dead-end", reason="approach didn't work")
+
+    archived_text = archived_path.read_text(encoding="utf-8")
+    assert "## Status\nAbandoned" in archived_text
+    # the raw log survives - abandoning never discards the working notes
+    assert "tried an approach" in archived_text
+
+    tracker_text = tools.STATE_TRACKER_PATH.read_text(encoding="utf-8")
+    assert "gitagent-dead-end" in tracker_text
+    assert "Abandoned" in tracker_text
+    assert "approach didn't work" in tracker_text
+
+    # the branch ref survives, but its commits were never merged into main
+    assert tools._branch_exists("gitagent-dead-end")
+    assert "gitagent-dead-end" not in _merged_into(gitagent_repo, "main")
+
+
+def test_abandon_branch_needs_no_ollama(gitagent_repo, monkeypatch):
+    tools.open_branch("gitagent-dead-end", "work that won't pan out")
+
+    def _boom(memory_text):
+        raise tools.GitAgentError("Ollama is down")
+
+    monkeypatch.setattr(tools, "_summarize_with_ollama", _boom)
+
+    archived_path = tools.abandon_branch("gitagent-dead-end", reason="not worth it")
+    assert "## Status\nAbandoned" in archived_path.read_text(encoding="utf-8")
+
+
+def test_abandon_nested_branch_logs_under_root(gitagent_repo):
+    tools.open_branch("parent", "parent branch")
+    tools.open_branch("child", "child branch", base="parent")
+    tools.abandon_branch("child", reason="went nowhere")
+
+    parent_memory = (tools.BRANCHES_DIR / "parent" / "MEMORY.md").read_text(encoding="utf-8")
+    assert "**child** — Abandoned — went nowhere" in parent_memory
+
+    # a nested branch never touches STATE_TRACKER.md
+    assert "child" not in tools.STATE_TRACKER_PATH.read_text(encoding="utf-8")
+    assert "child" not in _merged_into(gitagent_repo, "parent")
+
+
+def test_abandon_branch_dry_run_does_not_mutate(gitagent_repo):
+    tools.open_branch("gitagent-dead-end", "work that won't pan out")
+    before_tracker = tools.STATE_TRACKER_PATH.read_text(encoding="utf-8")
+
+    result = tools.abandon_branch("gitagent-dead-end", reason="nope", dry_run=True)
+
+    assert "[dry run]" in result
+    assert tools._branch_exists("gitagent-dead-end")
+    assert not (tools.ARCHIVED_BRANCHES_DIR / "gitagent-dead-end").exists()
+    assert tools.STATE_TRACKER_PATH.read_text(encoding="utf-8") == before_tracker
+
+
+def test_abandon_branch_rejects_already_finished_branch(gitagent_repo):
+    tools.open_branch("gitagent-real-branch", "test branch")
+    tools.close_branch("gitagent-real-branch")
+
+    with pytest.raises(tools.GitAgentError, match="already been finished"):
+        tools.abandon_branch("gitagent-real-branch", reason="too late")
+
+
+def test_close_branch_rejects_already_finished_branch(gitagent_repo):
+    tools.open_branch("gitagent-dead-end", "work that won't pan out")
+    tools.abandon_branch("gitagent-dead-end", reason="dropped")
+
+    with pytest.raises(tools.GitAgentError, match="already been finished"):
+        tools.close_branch("gitagent-dead-end")

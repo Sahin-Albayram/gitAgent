@@ -9,12 +9,13 @@ from .init import init_project
 from .tools import (
     MAIN_BRANCH,
     GitAgentError,
+    abandon_branch,
     close_branch,
     list_branches,
     open_branch,
     update_branch,
 )
-from .visualize import render_branch_graph
+from .visualize import render_branch_graph, render_dashboard
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,6 +68,36 @@ def main(argv: list[str] | None = None) -> int:
     close_branch_parser.add_argument(
         "--dry-run", action="store_true", help="Show what would happen without doing it"
     )
+    # default=None on both, so that when neither flag is passed the choice
+    # falls through to GITAGENT_SQUASH_ON_CLOSE rather than being overridden.
+    close_branch_parser.add_argument(
+        "--squash",
+        dest="squash",
+        action="store_true",
+        default=None,
+        help="Collapse the branch's per-note commits into one (default)",
+    )
+    close_branch_parser.add_argument(
+        "--no-squash",
+        dest="squash",
+        action="store_false",
+        help="Keep every commit and record a --no-ff merge commit instead",
+    )
+
+    abandon_branch_parser = subparsers.add_parser(
+        "abandon-branch",
+        help="Archive a branch without merging it - for work that didn't pan out",
+    )
+    abandon_branch_parser.add_argument("name", help="Branch name")
+    abandon_branch_parser.add_argument(
+        "-r",
+        "--reason",
+        default="",
+        help="Why the work is being dropped (recorded as the branch's outcome)",
+    )
+    abandon_branch_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would happen without doing it"
+    )
 
     status_parser = subparsers.add_parser(
         "status", help="List branches from STATE_TRACKER.md"
@@ -77,11 +108,30 @@ def main(argv: list[str] | None = None) -> int:
         help="Include Completed/Abandoned branches too (default: Active only)",
     )
 
+    search_parser = subparsers.add_parser(
+        "search", help="Semantic search over archived branch memories"
+    )
+    search_parser.add_argument("query", help="What to look for, in plain language")
+    search_parser.add_argument(
+        "-n", "--n-results", type=int, default=5, help="How many hits to show (default: 5)"
+    )
+
+    subparsers.add_parser(
+        "reindex", help="Rebuild the search index from every archived MEMORY.md"
+    )
+
     graph_parser = subparsers.add_parser(
         "graph", help="Render the commit/branch graph to a standalone HTML file"
     )
     graph_parser.add_argument(
         "-o", "--output", help="Output path (default: branch_graph.html in the repo root)"
+    )
+
+    dashboard_parser = subparsers.add_parser(
+        "dashboard", help="Render the branch table and commit graph as one HTML page"
+    )
+    dashboard_parser.add_argument(
+        "-o", "--output", help="Output path (default: dashboard.html in the repo root)"
     )
 
     args = parser.parse_args(argv)
@@ -123,11 +173,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "close-branch":
         try:
-            result = close_branch(args.name, dry_run=args.dry_run)
+            result = close_branch(args.name, dry_run=args.dry_run, squash=args.squash)
         except GitAgentError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(result if args.dry_run else f"Closed branch '{args.name}' -> {result}")
+        return 0
+
+    if args.command == "abandon-branch":
+        try:
+            result = abandon_branch(args.name, args.reason, dry_run=args.dry_run)
+        except GitAgentError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(result if args.dry_run else f"Abandoned branch '{args.name}' -> {result}")
         return 0
 
     if args.command == "status":
@@ -142,16 +201,62 @@ def main(argv: list[str] | None = None) -> int:
             print("No branches." if args.all else "No active branches.")
             return 0
         for branch in branches:
-            print(f"[{branch.id}] {branch.name} — {branch.status}")
+            # ASCII separator on purpose - this goes to a terminal, which on
+            # Windows may still be cp1252 and would mangle an em-dash.
+            print(f"[{branch.id}] {branch.name} - {branch.status}")
             print(f"    {branch.description}")
+            if branch.outcome:
+                print(f"    -> {branch.outcome}")
             for sub in branch.sub_branches:
                 print(f"    {sub}")
+        return 0
+
+    if args.command == "search":
+        # Imported here, not at module scope, so the CLI still starts on a bare
+        # install without the optional chromadb dependency.
+        from .search import search_branches
+
+        try:
+            hits = search_branches(args.query, n_results=args.n_results)
+        except GitAgentError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if not hits:
+            print("No matches.")
+            return 0
+        for hit in hits:
+            # `base` is blank for branches archived before MEMORY.md gained its
+            # '## Branched From' section - don't print an empty "(from )".
+            origin = f" (from {hit.base})" if hit.base else ""
+            print(f"[{hit.similarity:.3f}] {hit.name} - {hit.status}{origin}")
+            print(f"    {hit.snippet}")
+        return 0
+
+    if args.command == "reindex":
+        from .search import reindex_all
+
+        try:
+            count = reindex_all()
+        except GitAgentError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Indexed {count} archived branch memories.")
         return 0
 
     if args.command == "graph":
         output = Path(args.output) if args.output else None
         graph_path = render_branch_graph(output)
         print(f"Wrote graph -> {graph_path}")
+        return 0
+
+    if args.command == "dashboard":
+        output = Path(args.output) if args.output else None
+        try:
+            dashboard_path = render_dashboard(output)
+        except GitAgentError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Wrote dashboard -> {dashboard_path}")
         return 0
 
     return 1

@@ -3,7 +3,10 @@
 Each function here is exposed as a tool call to the local Ollama model.
 Git itself is the substrate: branches are real `git branch`es that actually
 diverge (each branch's own commits carry its `branches/<name>/MEMORY.md`),
-so `close_branch`'s merge is a real merge, not a no-op.
+so `close_branch` performs a real git merge, not a no-op. By default that
+merge is squashed (see SQUASH_ON_CLOSE) so a branch's per-note bookkeeping
+commits don't bury the main line's history; the note-by-note detail stays
+reachable on the branch ref, which is never deleted.
 
 STATE_TRACKER.md only ever gets a row for a top-level branch (one opened
 straight off MAIN_BRANCH) - it's read/written exclusively on MAIN_BRANCH, so
@@ -20,6 +23,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -37,6 +41,25 @@ MAIN_BRANCH = "main"
 
 OLLAMA_HOST = os.environ.get("GITAGENT_OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("GITAGENT_OLLAMA_MODEL", "llama3.1:8b")
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+# How close_branch brings a finished branch's content into its base.
+#
+# Squashing keeps the base branch's history readable: a branch's per-note
+# "Update branch: X" commits are bookkeeping, and replaying them into the main
+# line buries the commits you actually care about. Squashing collapses them
+# into one commit while the full note-by-note history stays reachable on the
+# branch ref itself (which is never deleted) and, in prose, in the archived
+# MEMORY.md. Set GITAGENT_SQUASH_ON_CLOSE=0, or pass --no-squash, for a
+# traditional --no-ff merge commit instead.
+SQUASH_ON_CLOSE = _env_flag("GITAGENT_SQUASH_ON_CLOSE", True)
 
 SUMMARY_PROMPT = """You are compressing a project branch's working notes into a \
 single changelog entry for a persistent state tracker.
@@ -249,19 +272,23 @@ def _log_sub_branch_open(root: str, name: str, description: str) -> None:
     _run_git("commit", "-m", f"Log open of {name} under {root}")
 
 
-def _log_sub_branch_close(root: str, name: str, summary: str) -> None:
+# The two ways a branch can finish, and the verb each one commits under.
+FINISH_VERBS = {"Completed": "Close", "Abandoned": "Abandon"}
+
+
+def _log_sub_branch_finish(root: str, name: str, status: str, summary: str) -> None:
     memory_path = BRANCHES_DIR / root / "MEMORY.md"
     lines = memory_path.read_text(encoding="utf-8").splitlines()
     prefix = f"- **{name}**"
     for i, line in enumerate(lines):
         if line.startswith(prefix):
-            lines[i] = f"- **{name}** — Completed — {summary}"
+            lines[i] = f"- **{name}** — {status} — {summary}"
             break
     else:
         raise GitAgentError(f"no Sub-Branches entry for {name} under {root}")
     memory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     _run_git("add", str(memory_path.relative_to(WORKSPACE_ROOT)))
-    _run_git("commit", "-m", f"Log close of {name} under {root}")
+    _run_git("commit", "-m", f"Log {FINISH_VERBS[status].lower()} of {name} under {root}")
 
 
 def open_branch(
@@ -454,14 +481,93 @@ def list_branches() -> list[BranchStatus]:
     return branches
 
 
-def close_branch(name: str, dry_run: bool = False) -> Path | str:
+def _is_archived(base: str, name: str) -> bool:
+    """Whether `name`'s memory has already been archived on `base`."""
+    try:
+        _read_file_at_ref(base, f"branches/archived/{name}/MEMORY.md")
+    except GitAgentError:
+        return False
+    return True
+
+
+def _ensure_not_already_archived(base: str, name: str) -> None:
+    if _is_archived(base, name):
+        raise GitAgentError(
+            f"branch has already been finished: {name} - its memory is at "
+            f"branches/archived/{name}/MEMORY.md on {base}"
+        )
+
+
+def _archive_memory(name: str, status: str) -> Path:
+    """Stamp the archived MEMORY.md's own `## Status` and commit the archive.
+
+    The caller must already have placed branches/archived/<name>/MEMORY.md on
+    the base branch: `close_branch` gets it there with `git mv` after its
+    merge, `abandon_branch` writes the branch's memory text straight there
+    since it has no merge to carry the file over.
+    """
+    archived_memory_path = ARCHIVED_BRANCHES_DIR / name / "MEMORY.md"
+    _set_memory_status(archived_memory_path, status)
+    _run_git("add", str(archived_memory_path.relative_to(WORKSPACE_ROOT)))
+    _run_git("commit", "-m", f"Archive branch: {name}")
+    return archived_memory_path
+
+
+def _record_branch_outcome(name: str, base: str, status: str, outcome: str) -> None:
+    """Record a finished branch's status and outcome in whichever memory owns
+    it: STATE_TRACKER.md on MAIN_BRANCH for a top-level branch, or its root
+    branch's `## Sub-Branches` line for a nested one. Ends back on `base`.
+    """
+    verb = FINISH_VERBS[status]
+    if base == MAIN_BRANCH:
+        _update_state_tracker_status(name, status, outcome)
+        _run_git("add", str(STATE_TRACKER_PATH.relative_to(WORKSPACE_ROOT)))
+        _run_git("commit", "-m", f"{verb} branch: {name}")
+    else:
+        root = _root_branch(base)
+        _run_git("checkout", root)
+        _log_sub_branch_finish(root, name, status, outcome)
+        if root != base:
+            _run_git("checkout", base)
+
+
+def _try_index(name: str) -> None:
+    """Add a just-archived branch to the semantic search index, best-effort.
+
+    Deliberately swallows every failure: the index is a derived, rebuildable
+    cache (see search.py), so a missing optional dependency or an unreachable
+    Ollama must never fail an otherwise-successful close/abandon and leave the
+    branch half-finished. `gitagent reindex` recovers whatever was skipped.
+
+    Imported lazily because chromadb is an optional extra - a bare install has
+    to keep working.
+    """
+    try:
+        from .search import index_branch
+
+        index_branch(name)
+    except Exception as exc:  # noqa: BLE001 - cache update must never be fatal
+        print(f"warning: could not index {name} for search: {exc}", file=sys.stderr)
+
+
+def close_branch(name: str, dry_run: bool = False, squash: bool | None = None) -> Path | str:
     """Summarize, merge, and archive a branch.
 
-    Summarizes the branch's MEMORY.md via the local Ollama model and merges
+    Summarizes the branch's MEMORY.md via the local Ollama model and brings
     the branch into its recorded base (MAIN_BRANCH for a top-level branch,
     or the parent branch it was nested under - see `open_branch`), then
     moves (never deletes) the MEMORY.md into branches/archived/<name>/ on
     the base branch so the raw log stays retrievable.
+
+    `squash` controls how the content lands, defaulting to SQUASH_ON_CLOSE:
+      True  - `git merge --squash`, collapsing the branch's per-note commits
+              into one, so the base branch's log stays readable.
+      False - a traditional `git merge --no-ff` merge commit, preserving each
+              "Update branch" commit in the base's history.
+    Either way nothing is lost: the branch ref keeps its full commit-by-commit
+    history, and the notes themselves live on in the archived MEMORY.md. Note
+    that `--squash` does not *record* a merge, so a squashed branch won't show
+    up in `git branch --merged` even though its content is present.
 
     If `name` was top-level, its STATE_TRACKER.md row is marked Completed
     with that summary, on MAIN_BRANCH. If `name` was nested, STATE_TRACKER.md
@@ -477,14 +583,18 @@ def close_branch(name: str, dry_run: bool = False) -> Path | str:
     if not _branch_exists(name):
         raise GitAgentError(f"branch does not exist: {name}")
 
+    squash = SQUASH_ON_CLOSE if squash is None else squash
+
     _ensure_clean_worktree()
 
     base = _branched_from(name)
+    _ensure_not_already_archived(base, name)
 
     if dry_run:
+        how = "squash-merge" if squash else "merge (--no-ff)"
         steps = [
             "generate a summary of its MEMORY.md via Ollama",
-            f"merge '{name}' into '{base}' (--no-ff)",
+            f"{how} '{name}' into '{base}'",
             f"archive branches/{name}/MEMORY.md -> branches/archived/{name}/MEMORY.md "
             "(status -> Completed)",
         ]
@@ -498,29 +608,77 @@ def close_branch(name: str, dry_run: bool = False) -> Path | str:
     summary = _summarize_with_ollama(memory_text)
 
     _run_git("checkout", base)
-    _run_git("merge", "--no-ff", "-m", f"Merge branch '{name}'", name)
+    if squash:
+        # --squash stages the branch's net changes without committing and
+        # without recording a merge, so the follow-up commit is ours to name.
+        _run_git("merge", "--squash", name)
+        _run_git("commit", "-m", f"Squash-merge branch '{name}'")
+    else:
+        _run_git("merge", "--no-ff", "-m", f"Merge branch '{name}'", name)
 
-    archive_dir = ARCHIVED_BRANCHES_DIR / name
-    archive_dir.parent.mkdir(parents=True, exist_ok=True)
+    ARCHIVED_BRANCHES_DIR.mkdir(parents=True, exist_ok=True)
     _run_git(
         "mv",
         str((BRANCHES_DIR / name).relative_to(WORKSPACE_ROOT)),
-        str(archive_dir.relative_to(WORKSPACE_ROOT)),
+        str((ARCHIVED_BRANCHES_DIR / name).relative_to(WORKSPACE_ROOT)),
     )
-    archived_memory_path = archive_dir / "MEMORY.md"
-    _set_memory_status(archived_memory_path, "Completed")
-    _run_git("add", str(archived_memory_path.relative_to(WORKSPACE_ROOT)))
-    _run_git("commit", "-m", f"Archive branch: {name}")
+    archived_memory_path = _archive_memory(name, "Completed")
+    _record_branch_outcome(name, base, "Completed", summary)
+    _try_index(name)
 
-    if base == MAIN_BRANCH:
-        _update_state_tracker_status(name, "Completed", summary)
-        _run_git("add", str(STATE_TRACKER_PATH.relative_to(WORKSPACE_ROOT)))
-        _run_git("commit", "-m", f"Close branch: {name}")
-    else:
-        root = _root_branch(base)
-        _run_git("checkout", root)
-        _log_sub_branch_close(root, name, summary)
-        if root != base:
-            _run_git("checkout", base)
+    return archived_memory_path
 
-    return archive_dir / "MEMORY.md"
+
+def abandon_branch(name: str, reason: str = "", dry_run: bool = False) -> Path | str:
+    """Archive a branch's memory without merging it - for work that didn't pan out.
+
+    Everything `close_branch` does except the merge: the branch's own
+    MEMORY.md is written straight into branches/archived/<name>/ on its base
+    (there's no merge to carry the file across), stamped Abandoned, and the
+    branch is recorded as Abandoned in STATE_TRACKER.md for a top-level
+    branch, or under its root's `## Sub-Branches` for a nested one. `reason`
+    - why the work was dropped - goes in the outcome cell.
+
+    Deliberately makes no LLM call, unlike close_branch. What's worth
+    promoting to the main line here isn't a compression of what the branch
+    did (the archived MEMORY.md still holds all of that, one hop away) but
+    *why it was dropped* - a fact only you have at abandon time, which no
+    summarizer could infer from the log.
+
+    The branch ref and its commits are left in place, exactly as close_branch
+    leaves them - the work is never deleted, just left unmerged and marked.
+    Ends checked out on the base branch.
+    """
+    if not _branch_exists(name):
+        raise GitAgentError(f"branch does not exist: {name}")
+
+    _ensure_clean_worktree()
+
+    base = _branched_from(name)
+    _ensure_not_already_archived(base, name)
+
+    if dry_run:
+        steps = [
+            f"copy branches/{name}/MEMORY.md to branches/archived/{name}/MEMORY.md "
+            f"on '{base}' (status -> Abandoned)",
+            f"leave '{name}' unmerged, its branch ref and commits intact",
+        ]
+        if base == MAIN_BRANCH:
+            steps.append(f"mark '{name}' Abandoned in STATE_TRACKER.md")
+        else:
+            steps.append(f"mark '{name}' Abandoned under '{_root_branch(base)}'s ## Sub-Branches")
+        return _format_dry_run(f"abandon_branch({name!r})", steps)
+
+    memory_text = _read_file_at_ref(name, f"branches/{name}/MEMORY.md")
+
+    _run_git("checkout", base)
+
+    archive_dir = ARCHIVED_BRANCHES_DIR / name
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    (archive_dir / "MEMORY.md").write_text(memory_text + "\n", encoding="utf-8")
+
+    archived_memory_path = _archive_memory(name, "Abandoned")
+    _record_branch_outcome(name, base, "Abandoned", reason)
+    _try_index(name)
+
+    return archived_memory_path

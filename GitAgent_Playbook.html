@@ -207,7 +207,7 @@ li { margin-bottom: 6px; }
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
   margin: 22px 0 8px;
 }
@@ -471,6 +471,7 @@ footer {
     <a href="#start">Start a project</a>
     <a href="#lifecycle">Branch lifecycle</a>
     <a href="#walkthrough">Walkthrough</a>
+    <a href="#find">Finding past work</a>
     <a href="#reference">Reference</a>
     <a href="#faq">FAQ</a>
   </div>
@@ -480,8 +481,8 @@ footer {
 
 <header class="hero">
   <div class="eyebrow">Playbook</div>
-  <h1>Opening, updating, and closing branches</h1>
-  <p class="lede">GitAgent turns real git branches into scoped memory for a project. This walks through starting a project, when to open a branch versus nest one, and exactly what each operation changes in <code>STATE_TRACKER.md</code> and a branch's own <code>MEMORY.md</code> — including a step-by-step look at the files themselves.</p>
+  <h1>Working with branch memory</h1>
+  <p class="lede">GitAgent turns real git branches into scoped memory for a project. This walks through starting a project, when to open a branch versus nest one, how work gets closed or abandoned, and how to find any of it again months later — plus exactly what each operation changes in <code>STATE_TRACKER.md</code> and a branch's own <code>MEMORY.md</code>, with a step-by-step look at the files themselves.</p>
 </header>
 
 <section id="start">
@@ -505,7 +506,7 @@ footer {
     <div class="section-head">
       <div class="num">02</div>
       <h2>The branch lifecycle</h2>
-      <p>Every piece of work becomes a real git branch with its own <code>MEMORY.md</code>. Three operations carry it through: open it, log notes as you go, close it when it's done.</p>
+      <p>Every piece of work becomes a real git branch with its own <code>MEMORY.md</code>. Four operations carry it through: open it, log notes as you go, then either close it when it's done or abandon it when it isn't going to be.</p>
     </div>
 
     <div class="cards">
@@ -524,8 +525,14 @@ footer {
       <div class="card llm">
         <div class="kicker">Finish</div>
         <h3>close_branch</h3>
-        <p class="when">Use it <b>once the work is actually done</b> — merged, resolved, abandoned-but-documented. It's the one step you can't easily undo, so don't call it mid-work.</p>
+        <p class="when">Use it <b>once the work is actually done</b> and you want it merged into its base. It's the one step you can't easily undo, so don't call it mid-work.</p>
         <span class="badge">Calls Ollama</span>
+      </div>
+      <div class="card">
+        <div class="kicker">Give up</div>
+        <h3>abandon_branch</h3>
+        <p class="when">Use it <b>when the work didn't pan out</b>. Same archiving as closing, but no merge — pass a <code>--reason</code> saying why you dropped it. The branch and its commits stay exactly where they are; nothing is deleted.</p>
+        <span class="badge none">No Ollama call</span>
       </div>
     </div>
 
@@ -607,12 +614,54 @@ footer {
   </div>
 </section>
 
+<section id="find">
+  <div class="col">
+    <div class="section-head">
+      <div class="num">04</div>
+      <h2>Finding past work</h2>
+      <p>Memory you can't retrieve isn't memory. These get you back to what you already decided — none of them require remembering a branch name.</p>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="kicker">Right now</div>
+        <h3>status</h3>
+        <p class="when">What's <b>open</b>. Prints the active branches with their goals and any nested work underneath. Add <code>--all</code> to include finished and abandoned ones with their outcomes.</p>
+        <span class="badge none">No Ollama call</span>
+      </div>
+      <div class="card llm">
+        <div class="kicker">Back then</div>
+        <h3>search</h3>
+        <p class="when">What you <b>already figured out</b>. Semantic search over archived branch memories — ask in plain language and it matches on meaning, so you'll find the right branch without recalling what you called it.</p>
+        <span class="badge">Calls Ollama</span>
+      </div>
+      <div class="card">
+        <div class="kicker">All at once</div>
+        <h3>dashboard</h3>
+        <p class="when">The <b>whole picture</b>. Renders the branch table above the commit graph as one self-contained HTML file — status pills, outcomes, nested work, full history.</p>
+        <span class="badge none">No Ollama call</span>
+      </div>
+      <div class="card">
+        <div class="kicker">Housekeeping</div>
+        <h3>reindex</h3>
+        <p class="when">Rebuilds the search index from the archived files on disk. You need it <b>once</b>, to backfill branches archived before search existed — after that, closing and abandoning index automatically.</p>
+        <span class="badge none">No Ollama call</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><b>Search needs two things the rest of GitAgent doesn't:</b> the optional extra (<code>pip install -e .[search]</code>) and a dedicated embedding model (<code>ollama pull nomic-embed-text</code>). A generative model like <code>llama3.1</code> can't produce embeddings — Ollama refuses with <i>"This server does not support embeddings"</i>, which is a complaint about the model, not your server.</p>
+      <p style="margin-top:10px;">The index lives in <code>.gitagent/chroma/</code> and is gitignored on purpose. It's <b>derived</b> — the archived <code>MEMORY.md</code> files stay the source of truth, and <code>reindex</code> rebuilds the whole thing from them. Deleting it costs you nothing but the time to regenerate.</p>
+    </div>
+  </div>
+</section>
+
 <section id="reference" class="band">
   <div class="col wide">
     <div class="section-head">
-      <div class="num">04</div>
+      <div class="num">05</div>
       <h2>Quick reference</h2>
-      <p>The same four commands, side by side.</p>
+      <p>Every command, side by side.</p>
     </div>
     <div class="ref-wrap">
       <table class="ref">
@@ -641,10 +690,34 @@ footer {
           <td>Appends a timestamped bullet to that branch's own Decisions Log.</td>
         </tr>
         <tr>
-          <td class="cmdcell">close-branch name</td>
+          <td class="cmdcell">close-branch name [--no-squash]</td>
           <td>Once, when the work is actually finished.</td>
           <td>Row flips to Completed + Ollama summary — only if the branch was top-level.</td>
           <td>Merges and archives it (branches/archived/…, never deleted). If nested, flips its line under the root's Sub-Branches to Completed + summary instead.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">abandon-branch name -r "reason"</td>
+          <td>When the work didn't pan out and won't be merged.</td>
+          <td>Row flips to Abandoned + your reason — only if the branch was top-level.</td>
+          <td>Archives it stamped Abandoned, without merging. Branch ref and commits stay put.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">status [--all]</td>
+          <td>Any time you want to know what's currently open.</td>
+          <td>Read-only.</td>
+          <td>Read-only.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">search "query" [-n N]</td>
+          <td>When you half-remember deciding something and want the branch that holds it.</td>
+          <td>Read-only.</td>
+          <td>Read-only — searches archived memories only.</td>
+        </tr>
+        <tr>
+          <td class="cmdcell">reindex</td>
+          <td>Once to backfill old branches; again only if you delete the index.</td>
+          <td>Read-only.</td>
+          <td>Read-only — rebuilds .gitagent/chroma/ from them.</td>
         </tr>
         <tr>
           <td class="cmdcell">graph [-o out]</td>
@@ -652,7 +725,16 @@ footer {
           <td>Read-only.</td>
           <td>Read-only.</td>
         </tr>
+        <tr>
+          <td class="cmdcell">dashboard [-o out]</td>
+          <td>Any time you want branch state and history on one page.</td>
+          <td>Read-only.</td>
+          <td>Read-only.</td>
+        </tr>
       </table>
+      <p style="margin-top:14px; font-size:0.86rem; color:var(--ink-dim);">
+        <code>open-branch</code>, <code>update-branch</code>, <code>close-branch</code> and <code>abandon-branch</code> all accept <code>--dry-run</code>, which prints exactly what the command would do and changes nothing.
+      </p>
     </div>
   </div>
 </section>
@@ -660,12 +742,18 @@ footer {
 <section id="faq">
   <div class="col">
     <div class="section-head">
-      <div class="num">05</div>
+      <div class="num">06</div>
       <h2>Things worth knowing</h2>
     </div>
     <dl class="faq">
       <dt>Do I need Ollama running for all of this?</dt>
-      <dd>Only for <code>close_branch</code> (and the polish step in <code>init</code>). Opening and updating branches never call it — they're plain structured logging.</dd>
+      <dd>Only for <code>close_branch</code>, <code>search</code>/<code>reindex</code>, and the polish step in <code>init</code>. Opening, updating and abandoning branches never call it — they're plain structured logging. Note that <code>search</code> needs a separate <i>embedding</i> model (<code>nomic-embed-text</code>); the generative model the others use can't do embeddings.</dd>
+
+      <dt>Why doesn't my closed branch show up in <code>git branch --merged</code>?</dt>
+      <dd>Because closing squashes by default. <code>git merge --squash</code> brings the branch's content across without <i>recording</i> a merge, so git doesn't count it as merged even though the content is there. The tradeoff buys you a readable main line — a branch's per-note <code>Update branch:</code> commits get collapsed into one instead of burying everything else. Nothing is lost: the note-by-note history stays on the branch ref, which is never deleted. Pass <code>--no-squash</code> (or set <code>GITAGENT_SQUASH_ON_CLOSE=0</code>) if you'd rather have a real merge commit with every note preserved inline.</dd>
+
+      <dt>What's the difference between closing and abandoning?</dt>
+      <dd>The merge, and only the merge. Both archive the <code>MEMORY.md</code> and both record an outcome. <code>close_branch</code> merges the work into its base and asks Ollama to summarize what happened; <code>abandon_branch</code> skips the merge entirely and records the <code>--reason</code> you give it instead. Abandoning deliberately makes no LLM call — the useful fact is <i>why you dropped it</i>, which only you know and no summarizer could infer from the log.</dd>
 
       <dt>I checked out a branch that isn't main and STATE_TRACKER.md looks out of date. Is that a bug?</dt>
       <dd>No — it's only guaranteed current on <code>main</code>. Any other branch's copy is a snapshot from whenever it forked. Use <code>git show main:STATE_TRACKER.md</code> to see the real, current table from anywhere.</dd>
@@ -678,6 +766,15 @@ footer {
 
       <dt>What if I close a nested branch before I'm done with its parent?</dt>
       <dd>That's the normal order, not an edge case — close the nested branch first, its summary lands on the parent's Sub-Branches, then close the parent whenever that's actually finished.</dd>
+
+      <dt>Can I safely delete <code>.gitagent/</code>, <code>dashboard.html</code> or <code>branch_graph.html</code>?</dt>
+      <dd>Yes — all three are gitignored and <b>derived</b>. The search index rebuilds with <code>gitagent reindex</code>; the two HTML pages regenerate with <code>gitagent dashboard</code> and <code>gitagent graph</code>. The source of truth is always the git-tracked <code>MEMORY.md</code> and <code>STATE_TRACKER.md</code> files.</dd>
+
+      <dt>What actually gets embedded when a branch is indexed?</dt>
+      <dd>Only the <code>## Goal</code> and <code>## Decisions Log</code> sections — one document per branch. Template scaffolding like <code>## Open Questions</code> is skipped because it's identical across every branch and would just dilute the signal. One consequence worth knowing: an abandoned branch's <i>reason</i> lives in <code>STATE_TRACKER.md</code>, not its <code>MEMORY.md</code>, so it isn't searchable — search will find the branch by its notes, but not by why you dropped it.</dd>
+
+      <dt>What if I run a command against the wrong branch by mistake?</dt>
+      <dd>Add <code>--dry-run</code> first. Every mutating command accepts it, and it prints the exact sequence of steps it would take without touching git or any file. It's built into the tool layer rather than just the CLI, because the intended caller is a local model driving these through a tool-calling loop with nobody confirming each call.</dd>
     </dl>
   </div>
 </section>

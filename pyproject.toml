@@ -13,6 +13,9 @@ gitagent = "gitagent.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Kept optional on purpose: chromadb is a heavy install (onnxruntime, numpy,
+# and friends) and the day-to-day open/update/close path never touches it.
+search = ["chromadb>=1.0"]
 
 [tool.setuptools.packages.find]
 include = ["gitagent*"]

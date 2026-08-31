@@ -1,5 +1,9 @@
 branch_graph.html
+dashboard.html
 __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+# Derived search index - rebuildable from the archived MEMORY.md files with
+# `gitagent reindex`, so it never belongs in git.
+.gitagent/
