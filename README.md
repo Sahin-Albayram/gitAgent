@@ -6,6 +6,28 @@ and commits are the substrate: opening a unit of work creates an actual
 merge and archives the log, never deletes it. See [CLAUDE.md](CLAUDE.md)
 for the full design rationale.
 
+## About this project & my role
+
+GitAgent is a personal learning project by
+[Sahin Albayram](https://github.com/Sahin-Albayram) — the sole author and
+maintainer. The goal isn't to ship a product; it's to master LLMs, RAG, and
+agentic systems by building the tooling myself and then living with it. Every
+tool here is dogfooded inside the workspace it was written for.
+
+**What I own:** the architecture and every design decision behind it — using
+real git as the memory substrate instead of reinventing versioning, keeping
+`STATE_TRACKER.md` to one row per top-level branch with nested work flattened
+into `## Sub-Branches`, squashing note commits at close, treating the vector
+index as a disposable cache with the git-tracked `MEMORY.md` files as the
+source of truth, and the chunking strategy that decides what actually gets
+embedded.
+
+**How it's built:** I use Claude Code as a build-time pair — it writes and
+iterates on the code under my direction, while the architectural calls stay
+mine. That split is deliberate and is documented in
+[CLAUDE.md](CLAUDE.md). At **run time** GitAgent talks only to a local Ollama
+model; no cloud model is ever in the loop.
+
 ## Prerequisites
 
 - Python 3.10+
